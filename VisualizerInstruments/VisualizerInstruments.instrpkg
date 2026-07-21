@@ -1,0 +1,755 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+VisualizerInstruments.instrpkg — LLM Observation package.
+
+Top-level layout (validator enforces this order):
+1. Package identity (<id>, <title>, <owner>)
+2. Schemas: how raw os_signpost events become typed table rows
+3. Augmentations: extra detail views contributed to other instruments
+(must come before <instrument>)
+4. Instrument: lanes, lists, aggregations, calltree views
+5. Template: the bundled .tracetemplate
+
+Railtracks Instrumentation lives in RailtracksInstrumentation/RailtracksInstrumentation.instrpkg
+(separate target, separate folder; PBXFileSystemSynchronizedRootGroup picks
+up everything inside).
+
+See documentation/FINDINGS.md for what was learned the hard way:
+CLIPS construction syntax, slice-type rules, and engineering-type
+click affordances.
+-->
+<package>
+    <id>io.czrml.VisualizerInstruments</id>
+    <title>VisualizerInstruments</title>
+    <owner><name>Cezar Mauricio</name></owner>
+    
+    <!--
+    ============================================================
+    SCHEMAS
+    ============================================================
+    Each schema turns matching os_signpost events into rows of a
+    typed table. <os-signpost-interval-schema> pairs a Begin event
+    with its End event; <os-signpost-point-schema> is for one-shot
+    events. Pattern <message> grammar uses literal strings + ?vars
+    to capture fields from the formatted signpost message.
+    -->
+    
+    <!-- Conversation: outermost interval, wraps an entire LLM run. -->
+    <os-signpost-interval-schema>
+        <id>track-conversation</id>
+        <title>LLM Observation</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"Conversation"</name>
+        <start-pattern><message>"conversationID=" ?conversationID</message></start-pattern>
+        <end-pattern><message></message></end-pattern>
+        <column>
+            <mnemonic>conversation-id</mnemonic>
+            <title>Conversation</title>
+            <type>string</type>
+            <expression>(str-cat "conversation-" ?conversationID)</expression>
+        </column>
+    </os-signpost-interval-schema>
+    
+    <!--
+    Actor: per-role turn (system / user / assistant / tool).
+    The <start-pattern> is doing real work here — beyond capturing
+    message fields it also binds the OS-side typed slots so we can
+    expose them as properly-typed columns:
+    
+    <thread>          → ?thread          (engineering type: thread)
+    <process>         → ?process         (engineering type: process)
+    <emit-location>   → ?emit-location   (engineering type: return-location,
+    the os_signpost emit point with
+    a real Mach-O UUID — unlike a
+    user-constructed cast)
+    
+    Sibling order is enforced by the validator:
+    time?, message?, thread?, process?, user-backtrace?, emit-location?
+    -->
+    <os-signpost-interval-schema>
+        <id>track-actor</id>
+        <title>Actor Turn</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"Actor"</name>
+        <start-pattern>
+            <message>"role=" ?role " conversationID=" ?conversationID " actorID=" ?actorID " fileID=" ?fileID " filePath=" ?filePath " line=" ?line " function=" ?function " address=" ?address</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+            <emit-location>?emit-location</emit-location>
+        </start-pattern>
+        <end-pattern><message>"role=" ?role</message></end-pattern>
+        <column>
+            <mnemonic>role</mnemonic>
+            <title>Role</title>
+            <type>string</type>
+            <expression>?role</expression>
+        </column>
+        <column>
+            <mnemonic>role-color</mnemonic>
+            <title>Role color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?role "user") then "Blue" else (if (eq ?role "assistant") then "Purple" else (if (eq ?role "system") then "Red" else (if (eq ?role "tool") then "Orange" else "Green"))))</expression>
+        </column>
+        <column>
+            <mnemonic>conversation-id</mnemonic>
+            <title>Conversation</title>
+            <type>string</type>
+            <expression>(str-cat "conversation-" ?conversationID)</expression>
+        </column>
+        <column>
+            <mnemonic>actor-id</mnemonic>
+            <title>Actor ID</title>
+            <type>string</type>
+            <expression>?actorID</expression>
+        </column>
+        <column>
+            <mnemonic>actor-label</mnemonic>
+            <title>Actor</title>
+            <type>string</type>
+            <expression>(str-cat ?role "-" ?actorID)</expression>
+        </column>
+        <column>
+            <mnemonic>file-id</mnemonic>
+            <title>File</title>
+            <type>string</type>
+            <expression>?fileID</expression>
+        </column>
+        <column>
+            <mnemonic>source-file</mnemonic>
+            <title>Source file</title>
+            <type>file-path</type>
+            <expression>?filePath</expression>
+        </column>
+        <column>
+            <mnemonic>line-number</mnemonic>
+            <title>Line</title>
+            <type>uint64</type>
+            <expression>?line</expression>
+        </column>
+        <!--
+        Per-event clickable symbol for the call-site of beginActor.
+        text-symbol = (process, text-address) — Instruments resolves
+        the address through the process's loaded image map and renders
+        it as "FunctionName + 0xNN" with right-click → Open in Source
+        Viewer.
+        -->
+        <column>
+            <mnemonic>code-location</mnemonic>
+            <title>Code location</title>
+            <type>text-symbol</type>
+            <expression>(engineering-type text-symbol ?process (engineering-type-cast text-address ?address))</expression>
+        </column>
+        <column>
+            <mnemonic>actor-thread</mnemonic>
+            <title>Thread</title>
+            <type>thread</type>
+            <expression>?thread</expression>
+        </column>
+        <column>
+            <mnemonic>emit-location</mnemonic>
+            <title>Emit location</title>
+            <type>return-location</type>
+            <expression>?emit-location</expression>
+        </column>
+        <!--
+        Single-frame "backtrace" so a <calltree> view can render the
+        call-site with the inline source-jump arrow.
+        -->
+        <column>
+            <mnemonic>code-backtrace</mnemonic>
+            <title>Backtrace</title>
+            <type>backtrace</type>
+            <expression>(engineering-type backtrace ?process (engineering-type text-addresses ?address))</expression>
+        </column>
+    </os-signpost-interval-schema>
+    
+    <!-- Token: per-token point event, correlated to its parent Actor via signpost id. -->
+    <os-signpost-point-schema>
+        <id>track-token</id>
+        <title>Token</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"Token"</name>
+        <pattern>
+            <message>"role=" ?role " conversationID=" ?conversationID " actorID=" ?actorID " address=" ?address " content=" ?content</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <column>
+            <mnemonic>role</mnemonic>
+            <title>Role</title>
+            <type>string</type>
+            <expression>?role</expression>
+        </column>
+        <column>
+            <mnemonic>role-color</mnemonic>
+            <title>Role color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?role "user") then "Blue" else (if (eq ?role "assistant") then "Purple" else (if (eq ?role "system") then "Red" else (if (eq ?role "tool") then "Orange" else "Green"))))</expression>
+        </column>
+        <column>
+            <mnemonic>conversation-id</mnemonic>
+            <title>Conversation</title>
+            <type>string</type>
+            <expression>(str-cat "conversation-" ?conversationID)</expression>
+        </column>
+        <column>
+            <mnemonic>actor-id</mnemonic>
+            <title>Actor ID</title>
+            <type>string</type>
+            <expression>?actorID</expression>
+        </column>
+        <column>
+            <mnemonic>actor-label</mnemonic>
+            <title>Actor</title>
+            <type>string</type>
+            <expression>(str-cat ?role "-" ?actorID)</expression>
+        </column>
+        <column>
+            <mnemonic>content</mnemonic>
+            <title>Content</title>
+            <type>string</type>
+            <expression>?content</expression>
+        </column>
+        <column>
+            <mnemonic>token-thread</mnemonic>
+            <title>Thread</title>
+            <type>thread</type>
+            <expression>?thread</expression>
+        </column>
+        <!--
+        2-frame backtrace: frame[0] = emitToken call site (real address),
+        frame[1] = actorID as virtual parent address — groups tokens under
+        their individual actor run in the calltree.
+        -->
+        <column>
+            <mnemonic>token-backtrace</mnemonic>
+            <title>Backtrace</title>
+            <type>backtrace</type>
+            <expression>(engineering-type backtrace ?process (engineering-type text-addresses ?address ?actorID))</expression>
+        </column>
+    </os-signpost-point-schema>
+    
+    <!-- JSONTreeNode: one point event per JSON node (branch or leaf), with parent-id for graph edges. -->
+    <os-signpost-point-schema>
+        <id>track-json-tree-node</id>
+        <title>JSON Tree Node</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"JSONTreeNode"</name>
+        <pattern>
+            <message>"nodeId=" ?nodeId " parentId=" ?parentId " key=" ?key " value=" ?value</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <column>
+            <mnemonic>node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>parent-id</mnemonic>
+            <title>Parent ID</title>
+            <type>string</type>
+            <expression>?parentId</expression>
+        </column>
+        <column>
+            <mnemonic>node-key</mnemonic>
+            <title>Key</title>
+            <type>string</type>
+            <expression>?key</expression>
+        </column>
+        <column>
+            <mnemonic>node-value</mnemonic>
+            <title>Value</title>
+            <type>string</type>
+            <expression>?value</expression>
+        </column>
+    </os-signpost-point-schema>
+    
+    <!-- JSONNode: one point event per JSON leaf, with 3-level path components. -->
+    <os-signpost-point-schema>
+        <id>track-json-node</id>
+        <title>JSON Node</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"JSONNode"</name>
+        <pattern>
+            <message>"key0=" ?key0 " key1=" ?key1 " key2=" ?key2 " value=" ?value</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <column>
+            <mnemonic>json-key-0</mnemonic>
+            <title>Level 0</title>
+            <type>string</type>
+            <expression>?key0</expression>
+        </column>
+        <column>
+            <mnemonic>json-key-1</mnemonic>
+            <title>Level 1</title>
+            <type>string</type>
+            <expression>?key1</expression>
+        </column>
+        <column>
+            <mnemonic>json-key-2</mnemonic>
+            <title>Level 2</title>
+            <type>string</type>
+            <expression>?key2</expression>
+        </column>
+        <column>
+            <mnemonic>json-value</mnemonic>
+            <title>Value</title>
+            <type>string</type>
+            <expression>?value</expression>
+        </column>
+    </os-signpost-point-schema>
+    
+    <!--
+    AgentNode: one point event per node in an agent call graph.
+    nodeType is "tool" or "agent". name is last so it can contain spaces.
+    hasError is "0" or "1". model and cost are empty strings for tool nodes.
+    -->
+    <os-signpost-point-schema>
+        <id>track-agent-node</id>
+        <title>Agent Node</title>
+        <subsystem>"io.czrml.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"AgentNode"</name>
+        <pattern>
+            <message>"nodeId=" ?nodeId " parentId=" ?parentId " nodeType=" ?nodeType " model=" ?model " cost=" ?cost " hasError=" ?hasError " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <!--
+        agent-node-id: typed array so node-format can extract label/id/symbol/color/outline/model/cost.
+        Indices: 0=name, 1=nodeId, 2=sf-symbol, 3=color, 4=outline, 5=model, 6=cost.
+        Error nodes: red + exclamationmark.circle.fill.
+        Agent nodes: purple + cpu.
+        Tool nodes: blue + hammer.
+        -->
+        <column>
+            <mnemonic>agent-node-id</mnemonic>
+            <title>Node</title>
+            <type>node</type>
+            <expression>(create$ ?name ?nodeId (if (eq ?hasError "1") then "exclamationmark.circle.fill" else (if (eq ?nodeType "agent") then "cpu" else "hammer")) (if (eq ?hasError "1") then "Red" else (if (eq ?nodeType "agent") then "Purple" else "Blue")) "1" ?model ?cost)</expression>
+        </column>
+        <!--
+        agent-parent-id: typed array using parentId as both label and identifier so Instruments
+        can merge this source reference with the destination row where the same id appears.
+        Root nodes emit an empty-identifier array; Instruments ignores edges to unresolvable ids.
+        -->
+        <column>
+            <mnemonic>agent-parent-id</mnemonic>
+            <title>Parent Node</title>
+            <type>node</type>
+            <expression>(create$ ?parentId ?parentId "circle" "steel" "0" "" "")</expression>
+        </column>
+        <column>
+            <mnemonic>agent-node-type</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?nodeType</expression>
+        </column>
+        <column>
+            <mnemonic>agent-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>agent-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
+        </column>
+        <column>
+            <mnemonic>agent-cost</mnemonic>
+            <title>Cost</title>
+            <type>string</type>
+            <expression>?cost</expression>
+        </column>
+        <column>
+            <mnemonic>agent-has-error</mnemonic>
+            <title>Error</title>
+            <type>string</type>
+            <expression>?hasError</expression>
+        </column>
+        <!-- Red for error nodes, Purple for agent nodes, Blue for tool calls. -->
+        <column>
+            <mnemonic>agent-type-color</mnemonic>
+            <title>Type Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?hasError "1") then "Red" else (if (eq ?nodeType "agent") then "Purple" else "Blue"))</expression>
+        </column>
+    </os-signpost-point-schema>
+    
+    <!--
+    ============================================================
+    INSTRUMENT
+    ============================================================
+    -->
+    <instrument>
+        <id>io.czrml.visualizer.observability</id>
+        <title>LLM Observation</title>
+        <category>Behavior</category>
+        <purpose>Conversation, actor and token timeline for observing LLM behavior.</purpose>
+        <icon>Generic</icon>
+        
+        <create-table>
+            <id>conversation-table</id>
+            <schema-ref>track-conversation</schema-ref>
+        </create-table>
+        <create-table>
+            <id>actor-table</id>
+            <schema-ref>track-actor</schema-ref>
+        </create-table>
+        <create-table>
+            <id>token-table</id>
+            <schema-ref>track-token</schema-ref>
+        </create-table>
+        <create-table>
+            <id>json-node-table</id>
+            <schema-ref>track-json-node</schema-ref>
+        </create-table>
+        <create-table>
+            <id>json-tree-table</id>
+            <schema-ref>track-json-tree-node</schema-ref>
+        </create-table>
+        <create-table>
+            <id>agent-node-table</id>
+            <schema-ref>track-agent-node</schema-ref>
+        </create-table>
+        
+        <!-- Timeline lanes. -->
+        <graph>
+            <title>LLM Observation</title>
+            
+            <lane>
+                <title>Conversation</title>
+                <table-ref>conversation-table</table-ref>
+                <base-color>Green</base-color>
+                <plot>
+                    <value-from>conversation-id</value-from>
+                    <label-from>conversation-id</label-from>
+                    <disable-implicit-qualifier/>
+                </plot>
+            </lane>
+            
+            <lane>
+                <title>Actors</title>
+                <table-ref>actor-table</table-ref>
+                <plot-template>
+                    <instance-by>role</instance-by>
+                    <label-format>%s</label-format>
+                    <value-from>role</value-from>
+                    <color-from>role-color</color-from>
+                    <label-from>actor-label</label-from>
+                    <disable-implicit-qualifier/>
+                </plot-template>
+            </lane>
+        </graph>
+        
+        <graph>
+            <title>LLM Token</title>
+            
+            <lane>
+                <title>Tokens</title>
+                <table-ref>token-table</table-ref>
+                <plot-template>
+                    <instance-by>role</instance-by>
+                    <label-format>%s</label-format>
+                    <value-from>role</value-from>
+                    <color-from>role-color</color-from>
+                    <label-from>content</label-from>
+                    <disable-implicit-qualifier/>
+                </plot-template>
+            </lane>
+        </graph>
+        
+        <list>
+            <title>Actor Turns</title>
+            <table-ref>actor-table</table-ref>
+            <column>start</column>
+            <column>duration</column>
+            <column>role</column>
+            <column>source-file</column>
+            <column>line-number</column>
+            <column>code-location</column>
+            <annotation-column>code-backtrace</annotation-column>
+        </list>
+        
+        <aggregation>
+            <title>Actor Turns Summary</title>
+            <table-ref>actor-table</table-ref>
+            <hierarchy>
+                <level>
+                    <column>conversation-id</column>
+                </level>
+                <level>
+                    <column>role</column>
+                </level>
+                <level>
+                    <column>file-id</column>
+                </level>
+            </hierarchy>
+            <column>
+                <title>Start</title>
+                <min>start</min>
+            </column>
+            <column>
+                <title>Count</title>
+                <count/>
+            </column>
+            <column>
+                <title>Total Duration</title>
+                <sum>duration</sum>
+            </column>
+            <column>
+                <title>Max Duration</title>
+                <max>duration</max>
+            </column>
+        </aggregation>
+        
+        <aggregation>
+            <title>Conversation Tree</title>
+            <table-ref>token-table</table-ref>
+            <hierarchy>
+                <level>
+                    <column>conversation-id</column>
+                </level>
+                <level>
+                    <column>actor-label</column>
+                </level>
+                <level>
+                    <column>content</column>
+                </level>
+            </hierarchy>
+            <visit-on-focus>Actor Turns</visit-on-focus>
+            <column>
+                <title>Start</title>
+                <choose-unique>timestamp</choose-unique>
+            </column>
+            <column>
+                <title>Count</title>
+                <count/>
+            </column>
+        </aggregation>
+        
+        <aggregation>
+            <title>JSON Tree</title>
+            <table-ref>json-node-table</table-ref>
+            <hierarchy>
+                <level>
+                    <column>json-key-0</column>
+                </level>
+                <level>
+                    <column>json-key-1</column>
+                </level>
+                <level>
+                    <column>json-key-2</column>
+                </level>
+            </hierarchy>
+            <column>
+                <title>Value</title>
+                <choose-unique>json-value</choose-unique>
+            </column>
+            <column>
+                <title>Count</title>
+                <count/>
+            </column>
+        </aggregation>
+
+        <!--
+        Agent Call Graph: one node per agent/tool in the call hierarchy.
+        Edges flow agent-parent-id → agent-node-id.
+        node-format extracts per-node label/symbol/color from the typed-array columns:
+          index 0 = name (label), 1 = nodeId (identifier), 2 = sf-symbol,
+          3 = color (Purple/Blue/Red), 4 = outline, 5 = model, 6 = cost.
+        -->
+        <object-graph>
+            <title>Agent Call Graph</title>
+            <edges>
+                <table-ref>agent-node-table</table-ref>
+                <source-node-column>agent-parent-id</source-node-column>
+                <destination-node-column>agent-node-id</destination-node-column>
+                <annotation-column>agent-model</annotation-column>
+                <annotation-column>agent-cost</annotation-column>
+            </edges>
+            <default-sf-symbol>cpu</default-sf-symbol>
+            <default-color>orange</default-color>
+            <node-format>
+                <label-field>0</label-field>
+                <identifier-field>1</identifier-field>
+                <symbol-field>2</symbol-field>
+                <color-field>3</color-field>
+                <outline-field>4</outline-field>
+                <annotation>
+                    <title>Model</title>
+                    <field>5</field>
+                </annotation>
+                <annotation>
+                    <title>Cost</title>
+                    <field>6</field>
+                </annotation>
+            </node-format>
+        </object-graph>
+
+        <!--
+        JSON Node Graph: directed tree where every JSON node (branch + leaf)
+        is a graph node. Edges flow from parent-id to node-id, reproducing
+        the full JSON hierarchy at arbitrary depth. key + value annotate
+        each node so the graph shows the JSON key (and leaf values).
+        -->
+        <object-graph>
+            <title>JSON Node Graph</title>
+            <edges>
+                <table-ref>json-tree-table</table-ref>
+                <source-node-column>parent-id</source-node-column>
+                <destination-node-column>node-id</destination-node-column>
+                <annotation-column>node-key</annotation-column>
+                <annotation-column>node-value</annotation-column>
+            </edges>
+            <default-sf-symbol>curlybraces</default-sf-symbol>
+            <default-color>blue</default-color>
+        </object-graph>
+
+        <object-graph>
+            <title>Conversation Graph</title>
+            <edges>
+                <table-ref>actor-table</table-ref>
+                <source-node-column>conversation-id</source-node-column>
+                <destination-node-column>actor-label</destination-node-column>
+            </edges>
+            <default-sf-symbol>bubble.left.and.bubble.right</default-sf-symbol>
+            <default-color>green</default-color>
+        </object-graph>
+        
+        <object-graph>
+            <title>Token Graph</title>
+            <edges>
+                <table-ref>token-table</table-ref>
+                <source-node-column>actor-label</source-node-column>
+                <destination-node-column>content</destination-node-column>
+                <annotation-column>conversation-id</annotation-column>
+                <annotation-column>role-color</annotation-column>
+            </edges>
+            <default-sf-symbol>text.bubble</default-sf-symbol>
+            <default-color>blue</default-color>
+        </object-graph>
+        
+        <!--        <list>-->
+        <!--            <title>Tokens</title>-->
+        <!--            <table-ref>token-table</table-ref>-->
+        <!--            <column>timestamp</column>-->
+        <!--            <column>role</column>-->
+        <!--            <column>content</column>-->
+        <!--        </list>-->
+        
+        <!--        <list>-->
+        <!--            <title>Actor Call Sites</title>-->
+        <!--            <table-ref>actor-table</table-ref>-->
+        <!--            <column>start</column>-->
+        <!--            <column>duration</column>-->
+        <!--            <column>role</column>-->
+        <!--            <column>code-location</column>-->
+        <!--            <column>source-file</column>-->
+        <!--            <column>line-number</column>-->
+        <!--            <column>function-name</column>-->
+        <!--        </list>-->
+        
+        <!-- Hierarchical rollup: file → function → line, with count + duration. -->
+        <!--        <aggregation>-->
+        <!--            <title>Calls by Source Location</title>-->
+        <!--            <table-ref>actor-table</table-ref>-->
+        <!--            <hierarchy>-->
+        <!--                <level>-->
+        <!--                    <column>file-id</column>-->
+        <!--                </level>-->
+        <!--                <level>-->
+        <!--                    <column>function-name</column>-->
+        <!--                </level>-->
+        <!--                <level>-->
+        <!--                    <column>line-number</column>-->
+        <!--                </level>-->
+        <!--            </hierarchy>-->
+        <!--            <column>-->
+        <!--                <title>Count</title>-->
+        <!--                <count/>-->
+        <!--            </column>-->
+        <!--            <column>-->
+        <!--                <title>Total duration</title>-->
+        <!--                <sum>duration</sum>-->
+        <!--            </column>-->
+        <!--        </aggregation>-->
+        
+        <!--
+        Symbols panel: Time-Profiler-style rollup grouped by the
+        text-symbol code-location. Aggregation rows render the
+        symbol with the focus arrow + click-to-source affordance.
+        -->
+        <!--        <aggregation>-->
+        <!--            <title>Symbols</title>-->
+        <!--            <table-ref>actor-table</table-ref>-->
+        <!--            <hierarchy>-->
+        <!--                <level>-->
+        <!--                    <column>code-location</column>-->
+        <!--                </level>-->
+        <!--            </hierarchy>-->
+        <!--            <column>-->
+        <!--                <title>Count</title>-->
+        <!--                <count/>-->
+        <!--            </column>-->
+        <!--            <column>-->
+        <!--                <title>Total duration</title>-->
+        <!--                <sum>duration</sum>-->
+        <!--            </column>-->
+        <!--        </aggregation>-->
+        
+        <!--
+        Call tree built from the synthetic 1-frame backtrace defined
+        on the actor schema. Each "stack" is a single frame, but the
+        view gives the inline source-jump arrow that <list> cells
+        don't render. Categorized by role, weighted by duration.
+        -->
+        <calltree>
+            <title>Call Tree</title>
+            <table-ref>actor-table</table-ref>
+            <backtrace-column>code-backtrace</backtrace-column>
+            <thread-column>actor-thread</thread-column>
+            <category-column>conversation-id</category-column>
+            <weight-column>duration</weight-column>
+        </calltree>
+        
+        <!--
+        Token Call Tree: same Conversation → Actor run → call site hierarchy
+        as the Conversation Tree aggregation, but rendered as a calltree so
+        each row carries the inline source-jump arrow. Category groups by
+        conversation; the 2-frame backtrace groups tokens under their actor
+        run (frame[1] = actorID virtual address) with the actual emit call
+        site as the leaf (frame[0]).
+        -->
+        <calltree>
+            <title>Token Call Tree</title>
+            <table-ref>token-table</table-ref>
+            <backtrace-column>token-backtrace</backtrace-column>
+            <thread-column>token-thread</thread-column>
+            <category-column>conversation-id</category-column>
+        </calltree>
+    </instrument>
+    
+    <!--
+    ============================================================
+    TEMPLATE
+    ============================================================
+    Imports the bundled .tracetemplate so this package shows up as
+    a runnable template in Instruments' template chooser.
+    -->
+    <template>
+        <import-from-file>LLM Observation.tracetemplate</import-from-file>
+    </template>
+    
+</package>

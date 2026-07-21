@@ -1,0 +1,965 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+FlowGraph.instrpkg — RTSFlowGraph visualization package.
+
+Schemas and instrument for visualizing nodes, edges, and LLM metrics
+from an RTSFlowGraph JSON file emitted via the JSONTools app.
+
+Views:
+- Flow Tree:     5-level aggregation (a0→a1→a2→a3→a4), leaf-only rows,
+                 with model/provider/tokens/latency/cost columns.
+- Flow Graph:    directed parent→child object graph (Agent/Tool nodes).
+- Tool I/O:      3-level aggregation (tool name → Input/Output → message)
+                 mapping every prompt, tool-call, arg, kwarg, and transcript
+                 message from both node llm_details and edge details.
+-->
+<package>
+    <id>io.railtown.VisualizerInstruments.RailtracksInstrumentation</id>
+    <title>Railtracks Instrumentation</title>
+    <owner><name>Railtown</name></owner>
+
+    <!--
+    ============================================================
+    SCHEMAS
+    ============================================================
+    -->
+    
+    <!--
+    FlowTreeNode: one point event per LEAF node in the RTSFlowGraph hierarchy.
+    Only leaf nodes (no children) emit this event; intermediate nodes appear as
+    implicit aggregation group headers.
+    node.name is written into the aX slot that matches the node's depth (a0–a4);
+    slots deeper than the leaf are empty string so no fake parent rows appear.
+    provider/inputTokens/outputTokens come from llm_details[0].
+    name is emitted for reference but is not used as a hierarchy level.
+    -->
+    <os-signpost-point-schema>
+        <id>track-flow-tree-node</id>
+        <title>Flow Tree Node</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"FlowTreeNode"</name>
+        <pattern>
+            <message>"nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " model=" ?model " provider=" ?provider " cost=" ?cost " latency=" ?latency " inputTokens=" ?inputTokens " outputTokens=" ?outputTokens " depth=" ?depth " error=" ?error " fileID=" ?fileID " filePath=" ?filePath " line=" ?line " function=" ?function " addr0=" ?addr0 " addr1=" ?addr1 " addr2=" ?addr2 " addr3=" ?addr3 " addr4=" ?addr4 " addr5=" ?addr5 " addr6=" ?addr6 " addr7=" ?addr7 " startTime=" ?startTime " parentName=" ?parentName " a0=" ?a0 " a1=" ?a1 " a2=" ?a2 " a3=" ?a3 " a4=" ?a4 " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <column>
+            <mnemonic>flow-tree-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-node-type</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?nodeType</expression>
+        </column>
+        <!--
+        Show "-" for a genuinely-empty value (e.g. a tool with no LLM call).
+        Parent/group rows stay blank where choose-unique spans mixed values —
+        that's the aggregation reporting "no single value", which the schema
+        can't override.
+        -->
+        <column>
+            <mnemonic>flow-tree-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>(if (eq ?model "") then "-" else ?model)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-provider</mnemonic>
+            <title>Provider</title>
+            <type>string</type>
+            <expression>(if (eq ?provider "") then "-" else ?provider)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-cost</mnemonic>
+            <title>Cost</title>
+            <type>fixed-decimal</type>
+            <expression>?cost</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-latency</mnemonic>
+            <title>Latency (s)</title>
+            <type>fixed-decimal</type>
+            <expression>?latency</expression>
+        </column>
+        <!--
+        Producer-supplied start time as absolute Unix-epoch seconds. The
+        time-since-epoch engineering type date-formats it (date + hh:mm:ss)
+        and it stays numerically sortable, so rows order chronologically —
+        the implicit event timestamp is emit time, useless under replay.
+        -->
+        <column>
+            <mnemonic>flow-tree-start-time</mnemonic>
+            <title>Started</title>
+            <type>time-since-epoch</type>
+            <expression>?startTime</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-input-tokens</mnemonic>
+            <title>In Tokens</title>
+            <type>uint64</type>
+            <expression>?inputTokens</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-output-tokens</mnemonic>
+            <title>Out Tokens</title>
+            <type>uint64</type>
+            <expression>?outputTokens</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-depth</mnemonic>
+            <title>Depth</title>
+            <type>uint64</type>
+            <expression>?depth</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <!--
+        a1–a4 map the SDK's "·" trailing filler (RailtracksSignposts.
+        trailingFill) to the CLIPS `sentinel` symbol ("no value"). With a
+        plain string the aggregation slices the event through all 5 levels,
+        creating filler sub-rows that carry the node's own data (inherent
+        to nested grouping — a node's event is a member of every deeper
+        group it spans). Sentinel asks the slicer to treat the level as
+        absent so the event stops at its real depth. a0 is never filler
+        (only non-roots emit, so a0 is always the root's name).
+        -->
+        <column>
+            <mnemonic>flow-tree-a0</mnemonic>
+            <title>Ancestor 0</title>
+            <type>string</type>
+            <expression>?a0</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-a1</mnemonic>
+            <title>Ancestor 1</title>
+            <type>string</type>
+            <expression>(if (eq ?a1 "·") then sentinel else ?a1)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-a2</mnemonic>
+            <title>Ancestor 2</title>
+            <type>string</type>
+            <expression>(if (eq ?a2 "·") then sentinel else ?a2)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-a3</mnemonic>
+            <title>Ancestor 3</title>
+            <type>string</type>
+            <expression>(if (eq ?a3 "·") then sentinel else ?a3)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-a4</mnemonic>
+            <title>Ancestor 4</title>
+            <type>string</type>
+            <expression>(if (eq ?a4 "·") then sentinel else ?a4)</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-node-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <!--
+        Shared mnemonic across schemas. The Tool I/O aggregation includes
+        this as a hierarchy level so visit-on-focus can hand a node-id
+        filter to the Call Tree view (which also reads node-id from
+        flow-tree-table).
+        -->
+        <column>
+            <mnemonic>node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <!--
+        Boolean encoded as uint64 (0/1) — .instrpkg has no native bool type.
+        Emitted as "1" from FlowGraphMapper when the node's inbound edge
+        status is Failed; otherwise "0".
+        -->
+        <column>
+            <mnemonic>flow-tree-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <!--
+        Row event-concept: Red on error (so the leading dot/icon flips red),
+        otherwise the original Agent=Purple / Tool=Blue split.
+        -->
+        <column>
+            <mnemonic>flow-tree-node-color</mnemonic>
+            <title>Type Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else (if (eq ?nodeType "Agent") then "Purple" else "Blue"))</expression>
+        </column>
+        <!--
+        Source-location columns. fileID is the bundle-prefixed Swift identifier
+        ("JSONTools/FlowGraphMapper.swift") suitable for Xcode resolution;
+        filePath is the absolute on-disk path Instruments can open via the
+        file-path renderer; address is the return-address from the emit
+        call-site (- 1 byte) which dSYMs resolve to the calling source line.
+        -->
+        <column>
+            <mnemonic>flow-tree-file-id</mnemonic>
+            <title>File ID</title>
+            <type>string</type>
+            <expression>?fileID</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-file-path</mnemonic>
+            <title>File</title>
+            <type>file-path</type>
+            <expression>?filePath</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-line</mnemonic>
+            <title>Line</title>
+            <type>uint64</type>
+            <expression>?line</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-function</mnemonic>
+            <title>Function</title>
+            <type>string</type>
+            <expression>?function</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-address</mnemonic>
+            <title>Address</title>
+            <type>address</type>
+            <expression>?addr0</expression>
+        </column>
+        <column>
+            <mnemonic>flow-tree-thread</mnemonic>
+            <title>Thread</title>
+            <type>thread</type>
+            <expression>?thread</expression>
+        </column>
+        <!--
+        8-frame backtrace synthesized from ?addr0..?addr7. Drives the Call
+        Tree view, where each frame carries the inline source-jump arrow.
+        Padded with 0 from the emitter when the stack is shallower than 8
+        frames — Instruments renders 0 as "???" and the leading real frames
+        still resolve. text-addresses is variadic; the schema fixes the
+        capture width at 8.
+        -->
+        <column>
+            <mnemonic>flow-tree-backtrace</mnemonic>
+            <title>Backtrace</title>
+            <type>backtrace</type>
+            <expression>(engineering-type backtrace ?process (engineering-type text-addresses ?addr0 ?addr1 ?addr2 ?addr3 ?addr4 ?addr5 ?addr6 ?addr7))</expression>
+        </column>
+    </os-signpost-point-schema>
+
+    <!--
+    FlowGraphNode: one point event per every node (roots and non-roots) in the
+    RTSFlowGraph hierarchy. Emitted alongside FlowTreeNode/FlowEdge so that the
+    directed parent→child graph can be reconstructed. Root nodes emit parentId="";
+    Instruments ignores edges to unresolvable ids so roots surface as graph roots.
+    Typed node arrays (index 0–6: label, id, symbol, color, outline, model, cost)
+    mirror the agent-node-id pattern from VisualizerInstruments.instrpkg.
+    -->
+    <os-signpost-point-schema>
+        <id>track-flow-graph-node</id>
+        <title>Flow Graph Node</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"FlowGraphNode"</name>
+        <!--
+        Field order: nodeId and parentId (the graph merge keys) come FIRST so any
+        free-text/space-containing value cannot perturb their capture. name and
+        model are kept at the end since CLIPS ?varname matches a single token
+        by default — putting them last lets multi-word values absorb cleanly.
+        -->
+        <pattern>
+            <message>"nodeId=" ?nodeId " parentId=" ?parentId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " parentType=" ?parentType " error=" ?error " parentError=" ?parentError " cost=" ?cost " model=" ?model " fileID=" ?fileID " filePath=" ?filePath " line=" ?line " function=" ?function " addr0=" ?addr0 " addr1=" ?addr1 " addr2=" ?addr2 " addr3=" ?addr3 " addr4=" ?addr4 " addr5=" ?addr5 " addr6=" ?addr6 " addr7=" ?addr7 " startTime=" ?startTime " parentName=" ?parentName " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <!--
+        flow-graph-dest-node / flow-graph-source-node: typed-array (CLIPS multifield)
+        columns so the object-graph's <node-format> can index into them.
+        Layout: index 0 = label, 1 = identifier, 2 = in-outline.
+        Destination uses the readable ?name as label; source uses ?parentId as
+        both label and identifier (same pattern as agent-parent-id). Instruments
+        merges nodes on identifier-field, and the destination row's richer label
+        wins visually so each merged node renders with its readable name.
+        Root rows emit parentId="" → unresolvable edge → root appears unparented.
+        -->
+        <!--
+        Typed-array layout (indices 0–3):
+          0 = label  (readable name)
+          1 = id     (merge key)
+          2 = symbol (SF Symbol — sparkles for Agent, wrench.and.screwdriver for Tool)
+          3 = color  (green for Agent, pink for Tool) — MUST be lowercase from the
+                     documented palette: blue|brown|green|orange|pink|red|yellow|steel.
+        Both columns use the same CLIPS conditional on the local *Type variable
+        so a parent's source-side array matches its destination-side array at
+        every node-format-referenced index — Instruments merges them unambiguously.
+        -->
+        <!--
+        Color slot (index 3) flips to "red" when the node's inbound edge
+        failed. Both dest-side and source-side use the same conditional on
+        their respective error flag so a node's color is identical in every
+        row Instruments merges it through.
+        -->
+        <column>
+            <mnemonic>flow-graph-dest-node</mnemonic>
+            <title>Node</title>
+            <type>node</type>
+            <expression>(create$ (if (eq ?name "") then "Root" else ?name) ?nodeId (if (eq ?nodeType "Agent") then "sparkles" else "wrench.and.screwdriver") (if (eq ?error 1) then "red" else (if (eq ?nodeType "Agent") then "green" else "blue")))</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-source-node</mnemonic>
+            <title>Parent Node</title>
+            <type>node</type>
+            <expression>(create$ (if (eq ?parentName "") then "Root" else ?parentName) ?parentId (if (eq ?parentType "Agent") then "sparkles" else "wrench.and.screwdriver") (if (eq ?parentError 1) then "red" else (if (eq ?parentType "Agent") then "green" else "blue")))</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-node-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-cost</mnemonic>
+            <title>Cost</title>
+            <type>fixed-decimal</type>
+            <expression>?cost</expression>
+        </column>
+        <!-- Producer-supplied start time as absolute Unix-epoch seconds. -->
+        <column>
+            <mnemonic>flow-graph-start-time</mnemonic>
+            <title>Started</title>
+            <type>time-since-epoch</type>
+            <expression>?startTime</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-node-type</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?nodeType</expression>
+        </column>
+        <!--
+        Source-location + 8-frame backtrace, surfaced as the object-graph's
+        Extended Detail annotation so selecting a node click-jumps to the
+        FlowGraphMapper.walk() emit site. filePath feeds the file-path
+        renderer; the backtrace drives the source-jump arrow.
+        -->
+        <column>
+            <mnemonic>flow-graph-file-path</mnemonic>
+            <title>File</title>
+            <type>file-path</type>
+            <expression>?filePath</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-line</mnemonic>
+            <title>Line</title>
+            <type>uint64</type>
+            <expression>?line</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-function</mnemonic>
+            <title>Function</title>
+            <type>string</type>
+            <expression>?function</expression>
+        </column>
+        <column>
+            <mnemonic>flow-graph-backtrace</mnemonic>
+            <title>Backtrace</title>
+            <type>backtrace</type>
+            <expression>(engineering-type backtrace ?process (engineering-type text-addresses ?addr0 ?addr1 ?addr2 ?addr3 ?addr4 ?addr5 ?addr6 ?addr7))</expression>
+        </column>
+    </os-signpost-point-schema>
+
+    <!--
+    FlowIO: one point event per logical input or output "message" attributed
+    to a tool (or agent) in the RTSFlowGraph. Two complementary sources land
+    in the same table:
+      - source=llm   → from nodes[].details.internals.llm_details[]:
+                       one Input row per input[].message, one Output row per
+                       tool-call in output.content (or per output text if it's
+                       a string). The FIRST output row of each llm_details call
+                       carries the call's tokens/cost/latency; the rest are
+                       zero so <sum> aggregation doesn't fan-out over-count.
+      - source=edge  → from edges[].details: one Input row per input_args[i]
+                       and per input_kwargs[k], one Output row per message in
+                       output.message_history, attributed to the edge TARGET
+                       (the tool being invoked). Edge rows carry zero metrics
+                       since costs already accrue on the agent that called.
+
+    Field order: every single-token field first; free-text ?content LAST so
+    CLIPS greedy-matches the line's remainder into it. toolName can contain
+    spaces (e.g. "Orchestrator Agent") — safe because " content=" is the next
+    literal terminator. Newlines/tabs in content are escaped in the emitter
+    so the signpost message stays single-line.
+    -->
+    <os-signpost-point-schema>
+        <id>track-flow-io</id>
+        <title>Flow Tool I/O</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"FlowIO"</name>
+        <pattern>
+            <message>"nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " messageId=" ?messageId " source=" ?source " direction=" ?direction " role=" ?role " model=" ?model " provider=" ?provider " cost=" ?cost " latency=" ?latency " inputTokens=" ?inputTokens " outputTokens=" ?outputTokens " startTime=" ?startTime " displayRole=" ?displayRole " toolName=" ?toolName " content=" ?content</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </pattern>
+        <column>
+            <mnemonic>flow-io-tool-name</mnemonic>
+            <title>Tool</title>
+            <type>string</type>
+            <expression>?toolName</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-direction</mnemonic>
+            <title>Direction</title>
+            <type>string</type>
+            <expression>?direction</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-display-role</mnemonic>
+            <title>Item</title>
+            <type>string</type>
+            <expression>?displayRole</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-role</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?role</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-content</mnemonic>
+            <title>Message</title>
+            <type>string</type>
+            <expression>?content</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-provider</mnemonic>
+            <title>Provider</title>
+            <type>string</type>
+            <expression>?provider</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-cost</mnemonic>
+            <title>Cost</title>
+            <type>fixed-decimal</type>
+            <expression>?cost</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-latency</mnemonic>
+            <title>Latency (s)</title>
+            <type>fixed-decimal</type>
+            <expression>?latency</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-input-tokens</mnemonic>
+            <title>In Tokens</title>
+            <type>uint64</type>
+            <expression>?inputTokens</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-output-tokens</mnemonic>
+            <title>Out Tokens</title>
+            <type>uint64</type>
+            <expression>?outputTokens</expression>
+        </column>
+        <!-- Owning node's start time as absolute Unix-epoch seconds. -->
+        <column>
+            <mnemonic>flow-io-start-time</mnemonic>
+            <title>Started</title>
+            <type>time-since-epoch</type>
+            <expression>?startTime</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <!--
+        Shared mnemonic with flow-tree-table so visit-on-focus from Tool I/O
+        can hand a node-id filter to Call Tree.
+        -->
+        <column>
+            <mnemonic>node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-message-id</mnemonic>
+            <title>Message ID</title>
+            <type>string</type>
+            <expression>?messageId</expression>
+        </column>
+        <column>
+            <mnemonic>flow-io-source</mnemonic>
+            <title>Source</title>
+            <type>string</type>
+            <expression>?source</expression>
+        </column>
+    </os-signpost-point-schema>
+
+    <!--
+    AgentRun: one interval per agent execution. The Begin event records
+    identification (nodeId/sessionId/runId/parentName/name); the End event
+    records outcome (error 0/1) and replays ?name so the same row carries
+    it on close. ?name is the LAST field in both patterns because it can
+    contain spaces — CLIPS' greedy single-token capture only works on the
+    pattern's trailing variable.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-agent-run</id>
+        <title>Agent Run</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"AgentRun"</name>
+        <start-pattern>
+            <message>"error=" ?error " nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " index=" ?index " parentName=" ?parentName " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>agent-run-name</mnemonic>
+            <title>Agent</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <!--
+        SDK-assigned 0-based start-order index within the run. Sort the
+        Agent Runs list by this to read agents in the order they started.
+        -->
+        <column>
+            <mnemonic>agent-run-index</mnemonic>
+            <title>Index</title>
+            <type>uint64</type>
+            <expression>?index</expression>
+        </column>
+        <column>
+            <mnemonic>agent-run-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>agent-run-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <column>
+            <mnemonic>agent-run-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>agent-run-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <column>
+            <mnemonic>agent-run-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <!--
+        Row color: Red on error, otherwise Purple (matching the Agent
+        color used in the Flow Tree event-concept column).
+        -->
+        <column>
+            <mnemonic>agent-run-color</mnemonic>
+            <title>Agent Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else "Purple")</expression>
+        </column>
+    </os-signpost-interval-schema>
+
+    <!--
+    ============================================================
+    INSTRUMENT
+    ============================================================
+    -->
+    <instrument>
+        <id>io.railtown.visualizer.railtracksInstrumentation</id>
+        <title>Railtracks Instrumentation</title>
+        <category>Behavior</category>
+        <purpose>Directed graph and LLM metrics view for RTSFlowGraph JSON runs (nodes, edges, costs).</purpose>
+        <icon>Generic</icon>
+
+        <create-table>
+            <id>flow-tree-table</id>
+            <schema-ref>track-flow-tree-node</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>flow-graph-table</id>
+            <schema-ref>track-flow-graph-node</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>flow-io-table</id>
+            <schema-ref>track-flow-io</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>agent-run-table</id>
+            <schema-ref>track-agent-run</schema-ref>
+        </create-table>
+
+        <!--
+        Agent Runs timeline: one swimlane per agent name. <plot-template>
+        with <instance-by>agent-run-name</instance-by> auto-creates a row
+        for every distinct agent that fires an interval, so concurrent
+        agents stack as parallel lanes. <color-from> ties row color to
+        the schema's event-concept (Red on error, Purple otherwise).
+        -->
+        <graph>
+            <title>Agent Runs</title>
+            <lane>
+                <title>Agents</title>
+                <table-ref>agent-run-table</table-ref>
+                <plot-template>
+                    <instance-by>agent-run-name</instance-by>
+                    <label-format>%s</label-format>
+                    <value-from>agent-run-name</value-from>
+                    <color-from>agent-run-color</color-from>
+                    <label-from>agent-run-name</label-from>
+                    <disable-implicit-qualifier/>
+                </plot-template>
+            </lane>
+        </graph>
+
+        <!--
+        Agent Runs list: tabular view of every interval with start time,
+        duration, agent name, parent, and error flag. Useful for
+        identifying slow / failing agents without scrubbing the timeline.
+        -->
+        <list>
+            <title>Agent Runs</title>
+            <table-ref>agent-run-table</table-ref>
+            <column>agent-run-index</column>
+            <column>start</column>
+            <column>duration</column>
+            <column>agent-run-name</column>
+            <column>agent-run-parent-name</column>
+            <column>agent-run-error</column>
+            <column>agent-run-run-id</column>
+            <column>agent-run-session-id</column>
+        </list>
+
+        <!--
+        Flow Tree: 5-level aggregation (a0→a1→a2→a3→a4).
+        Every non-root node emits a FlowTreeNode with its own pre-summed
+        metrics (tokens/cost from llm_details, latency from total_time).
+        Tokens and cost use <sum>: agent LLM calls are independent
+        measurements that genuinely add (the LLM API is billed for each
+        agent's calls separately), so parent rows show their subtree's
+        real total consumption — matching what the Tool I/O view sums to.
+        Latency stays on <max>: per-node total_time values overlap (a
+        parent's wall-clock subsumes its children's), so summing would
+        multi-count. <max> picks the dominating non-overlapping span.
+        node.name forward-fills aX from its depth through a4 so variable-
+        depth leaves don't create blank phantom rows.
+        -->
+        <aggregation>
+            <title>Flow Tree</title>
+            <table-ref>flow-tree-table</table-ref>
+            <hierarchy>
+                <level><column>flow-tree-a0</column></level>
+                <level><column>flow-tree-a1</column></level>
+                <level><column>flow-tree-a2</column></level>
+                <level><column>flow-tree-a3</column></level>
+                <level><column>flow-tree-a4</column></level>
+            </hierarchy>
+            <!--
+            Focus button: click the round arrow next to a row to push
+            the Call Tree onto the detail stack. Note: in practice the
+            Call Tree appears unfiltered (visit-on-focus filter pills
+            don't seem to narrow calltree destinations the way they do
+            lists), so this is effectively a "jump to Call Tree" gesture
+            rather than a "drill down" gesture. Useful for switching
+            views without leaving the keyboard.
+            -->
+            <visit-on-focus>Call Tree</visit-on-focus>
+            <!--
+            Started is the FIRST <column> so it renders as the 2nd visible
+            column (right after the name outline). <min>: a parent row
+            surfaces the earliest start among its descendants, so sorting by
+            Started orders branches by when they first began.
+            -->
+            <column>
+                <title>Started</title>
+                <min>flow-tree-start-time</min>
+            </column>
+            <column>
+                <title>Type</title>
+                <choose-unique>flow-tree-node-type</choose-unique>
+            </column>
+            <column>
+                <title>Error</title>
+                <choose-unique>flow-tree-error</choose-unique>
+            </column>
+            <column>
+                <title>Model</title>
+                <choose-unique>flow-tree-model</choose-unique>
+            </column>
+            <column>
+                <title>Provider</title>
+                <choose-unique>flow-tree-provider</choose-unique>
+            </column>
+            <column>
+                <title>In Tokens</title>
+                <sum>flow-tree-input-tokens</sum>
+            </column>
+            <column>
+                <title>Out Tokens</title>
+                <sum>flow-tree-output-tokens</sum>
+            </column>
+            <column>
+                <title>Parent</title>
+                <choose-unique>flow-tree-parent-name</choose-unique>
+            </column>
+            <column>
+                <title>Latency (s)</title>
+                <max>flow-tree-latency</max>
+            </column>
+            <column>
+                <title>Cost ($)</title>
+                <sum>flow-tree-cost</sum>
+            </column>
+            <column>
+                <title>Session</title>
+                <choose-unique>flow-tree-session-id</choose-unique>
+            </column>
+            <hidden-column>
+                <title>Depth</title>
+                <choose-unique>flow-tree-depth</choose-unique>
+            </hidden-column>
+            <hidden-column>
+                <title>Run</title>
+                <choose-unique>flow-tree-run-id</choose-unique>
+            </hidden-column>
+            <hidden-column>
+                <title>Name</title>
+                <choose-unique>flow-tree-node-name</choose-unique>
+            </hidden-column>
+        </aggregation>
+
+        <!--
+        Tool I/O: 2-level aggregation (tool/agent name → Input/Output).
+        The individual messages are NOT a hierarchy level — instead, the
+        focus button (visit-on-focus) jumps to the "Messages" list below,
+        filtered to the focused tool+direction, where each message's full
+        content shows in the right Extended Detail pane. Both views read
+        flow-io-table and share the tool-name/direction mnemonics, so the
+        focus filter resolves cleanly. Metrics sum across each group; only
+        the first output row of an llm_details call carries non-zero
+        metrics (edge rows carry zero), so <sum> doesn't over-count.
+        -->
+        <aggregation>
+            <title>Tool I/O Summary</title>
+            <table-ref>flow-io-table</table-ref>
+            <hierarchy>
+                <level><column>flow-io-tool-name</column></level>
+                <level><column>flow-io-direction</column></level>
+            </hierarchy>
+            <!--
+            Focus a tool+direction group → jump to the flat "Tool I/O" list
+            filtered to those messages, where selecting one shows its full
+            content in the right Extended Detail pane.
+            -->
+            <visit-on-focus>Tool I/O</visit-on-focus>
+            <column>
+                <title>Started</title>
+                <min>flow-io-start-time</min>
+            </column>
+            <column>
+                <title>Model</title>
+                <choose-unique>flow-io-model</choose-unique>
+            </column>
+            <column>
+                <title>Provider</title>
+                <choose-unique>flow-io-provider</choose-unique>
+            </column>
+            <column>
+                <title>Cost ($)</title>
+                <sum>flow-io-cost</sum>
+            </column>
+            <column>
+                <title>Latency (s)</title>
+                <sum>flow-io-latency</sum>
+            </column>
+            <column>
+                <title>In Tokens</title>
+                <sum>flow-io-input-tokens</sum>
+            </column>
+            <column>
+                <title>Out Tokens</title>
+                <sum>flow-io-output-tokens</sum>
+            </column>
+            <column>
+                <title>Session</title>
+                <choose-unique>flow-io-session-id</choose-unique>
+            </column>
+            <hidden-column>
+                <title>Run</title>
+                <choose-unique>flow-io-run-id</choose-unique>
+            </hidden-column>
+            <hidden-column>
+                <title>Node</title>
+                <choose-unique>node-id</choose-unique>
+            </hidden-column>
+        </aggregation>
+
+        <!--
+        Tool I/O: flat list — one row per FlowIO message. Each row IS a single
+        event (unlike the grouped "Tool I/O Summary" aggregation), so selecting
+        a row populates the right Extended Detail pane. The full message content
+        is an <annotation-column>, so it renders there on selection rather than
+        crowding the inline grid. Also the visit-on-focus target of the summary
+        aggregation (focusing a tool+direction group filters this list to it).
+        -->
+        <list>
+            <title>Tool I/O</title>
+            <table-ref>flow-io-table</table-ref>
+            <!--
+            Item (display-role) first. It carries a single GLOBAL emit-order
+            index ("0001 system", "0002 user", …) — never reset per node or
+            direction — so sorting the flat list by Item reads top-to-bottom
+            in emit order.
+            -->
+            <column>flow-io-display-role</column>
+            <column>flow-io-tool-name</column>
+            <column>flow-io-direction</column>
+            <column>flow-io-role</column>
+            <column>flow-io-start-time</column>
+            <column>flow-io-model</column>
+            <column>flow-io-input-tokens</column>
+            <column>flow-io-output-tokens</column>
+            <hidden-column>flow-io-message-id</hidden-column>
+            <hidden-column>flow-io-source</hidden-column>
+            <hidden-column>flow-io-run-id</hidden-column>
+            <!-- Full content shows in the right Extended Detail on selection. -->
+            <annotation-column>flow-io-content</annotation-column>
+        </list>
+
+        <!--
+        Call Tree: 8-frame backtrace per FlowTreeNode event. Every event is
+        emitted from the same FlowGraphMapper.walk() call site, so this view
+        exists purely as a source-jump tool — click an event to land at the
+        emit site in Xcode. No <weight-column>: cost-per-branch here would
+        only reflect walk() recursion depth, not the agent hierarchy. Use the
+        Flow Tree aggregation for real cost breakdown by agent.
+        -->
+        <calltree>
+            <title>Call Tree</title>
+            <table-ref>flow-tree-table</table-ref>
+            <backtrace-column>flow-tree-backtrace</backtrace-column>
+            <thread-column>flow-tree-thread</thread-column>
+            <category-column>flow-tree-run-id</category-column>
+        </calltree>
+
+        <!--
+        Flow Object Graph: directed parent→child graph for every node in the flow.
+        Edges flow flow-graph-source-node (parentId) → flow-graph-dest-node (nodeId);
+        Instruments merges nodes by string equality on these identifier columns
+        (same pattern as JSON Node Graph). Root rows emit an empty parentId,
+        which Instruments treats as an unresolvable edge → the root appears
+        unparented. The node name, type, model and cost surface as annotations
+        on selection.
+        -->
+        <object-graph>
+            <title>Flow Object Graph</title>
+            <edges>
+                <table-ref>flow-graph-table</table-ref>
+                <source-node-column>flow-graph-source-node</source-node-column>
+                <destination-node-column>flow-graph-dest-node</destination-node-column>
+                <annotation-column>flow-graph-node-name</annotation-column>
+                <annotation-column>flow-graph-node-type</annotation-column>
+                <annotation-column>flow-graph-model</annotation-column>
+                <annotation-column>flow-graph-cost</annotation-column>
+                <annotation-column>flow-graph-start-time</annotation-column>
+                <annotation-column>flow-graph-file-path</annotation-column>
+                <annotation-column>flow-graph-line</annotation-column>
+                <annotation-column>flow-graph-function</annotation-column>
+                <!--
+                Backtrace annotation: shows in Extended Detail when a node
+                is selected, with the inline source-jump arrow back to the
+                FlowGraphMapper.walk() emit site.
+                -->
+                <annotation-column>flow-graph-backtrace</annotation-column>
+            </edges>
+            <default-sf-symbol>cpu</default-sf-symbol>
+            <default-color>pink</default-color>
+            <node-format>
+                <label-field>0</label-field>
+                <identifier-field>1</identifier-field>
+                <symbol-field>2</symbol-field>
+                <color-field>3</color-field>
+            </node-format>
+        </object-graph>
+    </instrument>
+
+    <template>
+        <import-from-file>Railtracks Instrumentation.tracetemplate</import-from-file>
+    </template>
+</package>
