@@ -560,6 +560,9 @@ Views:
     it on close. ?name is the LAST field in both patterns because it can
     contain spaces — CLIPS' greedy single-token capture only works on the
     pattern's trailing variable.
+    The Begin's seeded error=0 binds to ?startError, not ?error: a variable
+    used in both patterns must match, so an error=1 End would never close
+    the interval.
     -->
     <os-signpost-interval-schema>
         <id>track-agent-run</id>
@@ -568,7 +571,7 @@ Views:
         <category>"Observation"</category>
         <name>"AgentRun"</name>
         <start-pattern>
-            <message>"error=" ?error " nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " index=" ?index " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " index=" ?index " parentName=" ?parentName " name=" ?name</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -631,6 +634,16 @@ Views:
             <type>event-concept</type>
             <expression>(if (eq ?error 1) then "Red" else "Purple")</expression>
         </column>
+        <!--
+        Intervals still open (in flight during a live recording, or never
+        ended) only have the Begin side, where ?error isn't bound.
+        -->
+        <open-interval-template>
+            <mnemonic>agent-run-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>agent-run-color</mnemonic>
+            <expression>"Purple"</expression>
+        </open-interval-template>
     </os-signpost-interval-schema>
 
     <!--
