@@ -647,6 +647,109 @@ Views:
     </os-signpost-interval-schema>
 
     <!--
+    NodeRun: one interval per node call (Agent, Tool, Function, custom).
+    The kit computes a hierarchical lane string ("<key> <name>", e.g.
+    "00-000.000 Math Agent") so lanes sort in call-tree order, and a slot
+    that separates overlapping calls within the same lane. ?name stays the
+    LAST field in both patterns, and the Begin's error binds to ?startError,
+    for the same reasons as AgentRun. AgentRun above stays for older SDK
+    versions.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-run</id>
+        <title>Node Run</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " parentName=" ?parentName " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-lane</mnemonic>
+            <title>Node</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-type</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?nodeType</expression>
+        </column>
+        <!--
+        Kit-assigned sub-row within a lane: 0 unless calls in the same lane
+        overlap in time. The Node Runs graph qualifies its plot by this.
+        -->
+        <column>
+            <mnemonic>node-run-slot</mnemonic>
+            <title>Slot</title>
+            <type>uint64</type>
+            <expression>?slot</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-parent-node-id</mnemonic>
+            <title>Parent Node ID</title>
+            <type>string</type>
+            <expression>?parentNodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <!--
+        Row color: Red on error, otherwise Agent=Purple / Tool=Blue (matching
+        the Flow Tree event-concept column), Green for Function and custom types.
+        -->
+        <column>
+            <mnemonic>node-run-color</mnemonic>
+            <title>Node Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else (if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green")))</expression>
+        </column>
+        <!--
+        Intervals still open (in flight during a live recording, or never
+        ended) only have the Begin side, where ?error isn't bound.
+        -->
+        <open-interval-template>
+            <mnemonic>node-run-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-color</mnemonic>
+            <expression>(if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green"))</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <!--
     ============================================================
     INSTRUMENT
     ============================================================
@@ -678,6 +781,33 @@ Views:
             <schema-ref>track-agent-run</schema-ref>
         </create-table>
 
+        <create-table>
+            <id>node-run-table</id>
+            <schema-ref>track-node-run</schema-ref>
+        </create-table>
+
+        <!--
+        Node Runs timeline: one swimlane per kit-computed lane string. The
+        lane key prefix ("00-000.000 ...") makes lanes sort in call-tree
+        order. <qualified-by>node-run-slot</qualified-by> splits overlapping
+        calls in the same lane onto separate sub-rows.
+        -->
+        <graph>
+            <title>Node Runs</title>
+            <lane>
+                <title>Nodes</title>
+                <table-ref>node-run-table</table-ref>
+                <plot-template>
+                    <instance-by>node-run-lane</instance-by>
+                    <label-format>%s</label-format>
+                    <value-from>node-run-lane</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-lane</label-from>
+                    <qualified-by>node-run-slot</qualified-by>
+                </plot-template>
+            </lane>
+        </graph>
+
         <!--
         Agent Runs timeline: one swimlane per agent name. <plot-template>
         with <instance-by>agent-run-name</instance-by> auto-creates a row
@@ -700,6 +830,23 @@ Views:
                 </plot-template>
             </lane>
         </graph>
+
+        <!--
+        Node Runs list: tabular view of every node call interval.
+        -->
+        <list>
+            <title>Node Runs</title>
+            <table-ref>node-run-table</table-ref>
+            <column>start</column>
+            <column>duration</column>
+            <column>node-run-lane</column>
+            <column>node-run-type</column>
+            <column>node-run-parent-name</column>
+            <column>node-run-slot</column>
+            <column>node-run-error</column>
+            <column>node-run-run-id</column>
+            <column>node-run-session-id</column>
+        </list>
 
         <!--
         Agent Runs list: tabular view of every interval with start time,
