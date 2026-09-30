@@ -1,15 +1,6 @@
 {
-  "originHash" : "9127f4aed9f77bcb348cc9de77dd7f6b668c88319f671adc5af9d3957bb5e1ab",
+  "originHash" : "b1dd8744238e20f1f25d0453422372d9d789370790c42ee5a2a7c02bf18fd741",
   "pins" : [
-    {
-      "identity" : "railtracksinstrumentationkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/RailtownAI/railtracks-swift-visualizer-instruments",
-      "state" : {
-        "revision" : "a0e837e650b7c2908e462b8aae022891803b3d36",
-        "version" : "0.1.5"
-      }
-    },
     {
       "identity" : "swift-log",
       "kind" : "remoteSourceControl",

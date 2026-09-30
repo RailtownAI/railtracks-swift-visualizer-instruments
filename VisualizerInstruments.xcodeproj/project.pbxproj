@@ -286,7 +286,7 @@
 			mainGroup = D3E883592FAB7082005A8E55;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				1908F9762FD07D6E00C4132E /* XCRemoteSwiftPackageReference "RailtracksInstrumentationKit" */,
+				1908F9762FD07D6E00C4132E /* XCLocalSwiftPackageReference "../railtracks-swift-instrumentation-kit" */,
 				1A2B3C4D00000000000000A1 /* XCRemoteSwiftPackageReference "swift-log" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1000,15 +1000,14 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		1908F9762FD07D6E00C4132E /* XCRemoteSwiftPackageReference "RailtracksInstrumentationKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/RailtownAI/railtracks-swift-visualizer-instruments";
-			requirement = {
-				kind = exactVersion;
-				version = 0.1.5;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		1908F9762FD07D6E00C4132E /* XCLocalSwiftPackageReference "../railtracks-swift-instrumentation-kit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../railtracks-swift-instrumentation-kit";
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		1A2B3C4D00000000000000A1 /* XCRemoteSwiftPackageReference "swift-log" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-log.git";
@@ -1022,7 +1021,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		1930040D2FC7749A00B5D836 /* RailtracksInstrumentationKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1908F9762FD07D6E00C4132E /* XCRemoteSwiftPackageReference "RailtracksInstrumentationKit" */;
+			package = 1908F9762FD07D6E00C4132E /* XCLocalSwiftPackageReference "../railtracks-swift-instrumentation-kit" */;
 			productName = RailtracksInstrumentationKit;
 		};
 		1A2B3C4D00000000000000A2 /* Logging */ = {
