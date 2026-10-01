@@ -763,10 +763,10 @@ Views:
             <expression>(sub-string 1 (- (str-index "-" ?name) 1) ?name)</expression>
         </column>
         <!--
-        Kit-assigned sub-row within the fixed per-type lane (Agents, Tools,
-        or Nodes for everything else): the lowest slot not held by another
-        live call of the same type, process-wide. The Node Runs by Type
-        graph qualifies its plots by this.
+        Kit-assigned sub-row within a fixed per-type lane: the lowest slot
+        not held by another live call of the same type bucket (Agent, Tool,
+        or Other), process-wide. The Node Runs by Type graph qualifies its
+        Agents and Tools plots by the per-type tables' copy of this.
         -->
         <column>
             <mnemonic>node-run-type-slot</mnemonic>
@@ -793,29 +793,6 @@ Views:
             <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
         </column>
         <!--
-        One name column per fixed lane of the Node Runs by Type graph. Each
-        is the node name for its own type and sentinel otherwise, so a row
-        plots in exactly one of the Nodes, Agents and Tools lanes.
-        -->
-        <column>
-            <mnemonic>node-run-agent-name</mnemonic>
-            <title>Agent Name</title>
-            <type>string</type>
-            <expression>(if (eq ?nodeType "Agent") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else sentinel)</expression>
-        </column>
-        <column>
-            <mnemonic>node-run-tool-name</mnemonic>
-            <title>Tool Name</title>
-            <type>string</type>
-            <expression>(if (eq ?nodeType "Tool") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else sentinel)</expression>
-        </column>
-        <column>
-            <mnemonic>node-run-other-name</mnemonic>
-            <title>Node Name</title>
-            <type>string</type>
-            <expression>(if (or (eq ?nodeType "Agent") (eq ?nodeType "Tool")) then sentinel else (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name))</expression>
-        </column>
-        <!--
         Intervals still open (in flight during a live recording, or never
         ended) only have the Begin side, where ?error isn't bound.
         -->
@@ -824,6 +801,165 @@ Views:
             <expression>?startError</expression>
             <mnemonic>node-run-color</mnemonic>
             <expression>(if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green"))</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <!--
+    NodeRun, Agent and Tool calls only: the same signpost as track-node-run,
+    with the type as a constant in the start pattern, so each table holds
+    one type and feeds one lane of the Node Runs by Type graph. Name and
+    Hover use track-node-run's expressions, and the open-interval template
+    fills Error and Color the same way.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-run-agent</id>
+        <title>Node Run (Agent)</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-agent-lane</mnemonic>
+            <title>Node</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-color</mnemonic>
+            <title>Agent Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else "Purple")</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <open-interval-template>
+            <mnemonic>node-run-agent-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-agent-color</mnemonic>
+            <expression>"Purple"</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <os-signpost-interval-schema>
+        <id>track-node-run-tool</id>
+        <title>Node Run (Tool)</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-tool-lane</mnemonic>
+            <title>Node</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-color</mnemonic>
+            <title>Tool Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else "Blue")</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <open-interval-template>
+            <mnemonic>node-run-tool-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-tool-color</mnemonic>
+            <expression>"Blue"</expression>
         </open-interval-template>
     </os-signpost-interval-schema>
 
@@ -864,6 +1000,16 @@ Views:
             <schema-ref>track-node-run</schema-ref>
         </create-table>
 
+        <create-table>
+            <id>node-run-agent-table</id>
+            <schema-ref>track-node-run-agent</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>node-run-tool-table</id>
+            <schema-ref>track-node-run-tool</schema-ref>
+        </create-table>
+
         <!--
         Node Runs timeline: one swimlane per kit-computed lane string. The
         lane key prefix ("00-000.000 ...") makes lanes sort in call-tree
@@ -887,42 +1033,33 @@ Views:
         </graph>
 
         <!--
-        Node Runs by Type: three fixed lanes, Nodes, Agents and Tools, which
-        render in declared order (like Apple's Foundation Models instrument).
-        Each plot takes its lane's name column, which is sentinel for the
-        other types, and <qualified-by>node-run-type-slot</qualified-by>
+        Node Runs by Type: two fixed lanes, Agents and Tools, which render in
+        declared order (like Apple's Foundation Models instrument). Each lane
+        reads its own per-type table, so it draws only that type's calls:
+        Instruments still draws rows whose value is sentinel, so one shared
+        table can't be filtered per lane. <qualified-by> on the type slot
         splits overlapping calls of the same type onto separate sub-rows.
         -->
         <graph>
             <title>Node Runs by Type</title>
             <lane>
-                <title>Nodes</title>
-                <table-ref>node-run-table</table-ref>
-                <plot>
-                    <value-from>node-run-other-name</value-from>
-                    <color-from>node-run-color</color-from>
-                    <label-from>node-run-hover</label-from>
-                    <qualified-by>node-run-type-slot</qualified-by>
-                </plot>
-            </lane>
-            <lane>
                 <title>Agents</title>
-                <table-ref>node-run-table</table-ref>
+                <table-ref>node-run-agent-table</table-ref>
                 <plot>
                     <value-from>node-run-agent-name</value-from>
-                    <color-from>node-run-color</color-from>
-                    <label-from>node-run-hover</label-from>
-                    <qualified-by>node-run-type-slot</qualified-by>
+                    <color-from>node-run-agent-color</color-from>
+                    <label-from>node-run-agent-hover</label-from>
+                    <qualified-by>node-run-agent-type-slot</qualified-by>
                 </plot>
             </lane>
             <lane>
                 <title>Tools</title>
-                <table-ref>node-run-table</table-ref>
+                <table-ref>node-run-tool-table</table-ref>
                 <plot>
                     <value-from>node-run-tool-name</value-from>
-                    <color-from>node-run-color</color-from>
-                    <label-from>node-run-hover</label-from>
-                    <qualified-by>node-run-type-slot</qualified-by>
+                    <color-from>node-run-tool-color</color-from>
+                    <label-from>node-run-tool-hover</label-from>
+                    <qualified-by>node-run-tool-type-slot</qualified-by>
                 </plot>
             </lane>
         </graph>
