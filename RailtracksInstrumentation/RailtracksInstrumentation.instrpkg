@@ -738,6 +738,31 @@ Views:
             <expression>(if (eq ?error 1) then "Red" else (if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green")))</expression>
         </column>
         <!--
+        Derived from the lane string "<key> <name>": the key is "%02d-%03d"
+        (run ordinal, root index) plus ".%03d" per nesting level, so its
+        length is 6 + 4*depth and the first space sits at 7 + 4*depth.
+        Name drops the key, Depth feeds the containment graph, and Run is
+        the ordinal before the first "-".
+        -->
+        <column>
+            <mnemonic>node-run-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-depth</mnemonic>
+            <title>Depth</title>
+            <type>containment-level</type>
+            <expression>(div (- (str-index " " ?name) 7) 4)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-run</mnemonic>
+            <title>Run #</title>
+            <type>string</type>
+            <expression>(sub-string 1 (- (str-index "-" ?name) 1) ?name)</expression>
+        </column>
+        <!--
         Intervals still open (in flight during a live recording, or never
         ended) only have the Begin side, where ?error isn't bound.
         -->
@@ -809,6 +834,29 @@ Views:
         </graph>
 
         <!--
+        Node Runs (containment): one lane per run, with each node call
+        nested under its caller by containment level. Run, Name and Depth
+        are derived from the lane string, so the kit's wire format is the
+        same one the Node Runs graph above uses.
+        -->
+        <graph>
+            <title>Node Runs (containment)</title>
+            <lane>
+                <title>Runs</title>
+                <table-ref>node-run-table</table-ref>
+                <plot-template>
+                    <instance-by>node-run-run</instance-by>
+                    <label-format>Run %s</label-format>
+                    <value-from>node-run-name</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-lane</label-from>
+                    <disable-implicit-qualifier/>
+                    <containment-level-from>node-run-depth</containment-level-from>
+                </plot-template>
+            </lane>
+        </graph>
+
+        <!--
         Agent Runs timeline: one swimlane per agent name. <plot-template>
         with <instance-by>agent-run-name</instance-by> auto-creates a row
         for every distinct agent that fires an interval, so concurrent
@@ -841,6 +889,7 @@ Views:
             <column>duration</column>
             <column>node-run-lane</column>
             <column>node-run-type</column>
+            <column>node-run-depth</column>
             <column>node-run-parent-name</column>
             <column>node-run-slot</column>
             <column>node-run-error</column>
