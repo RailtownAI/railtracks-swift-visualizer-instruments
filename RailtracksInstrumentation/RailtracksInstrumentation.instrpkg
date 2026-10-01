@@ -662,7 +662,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -763,6 +763,59 @@ Views:
             <expression>(sub-string 1 (- (str-index "-" ?name) 1) ?name)</expression>
         </column>
         <!--
+        Kit-assigned sub-row within the fixed per-type lane (Agents, Tools,
+        or Nodes for everything else): the lowest slot not held by another
+        live call of the same type, process-wide. The Node Runs by Type
+        graph qualifies its plots by this.
+        -->
+        <column>
+            <mnemonic>node-run-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <!--
+        What the node received (prompt for an agent, arguments for a tool),
+        whitespace-collapsed and capped at 512 UTF-8 bytes by the kit.
+        Hover is the interval label: "Name: input", or just "Name" when the
+        input is empty.
+        -->
+        <column>
+            <mnemonic>node-run-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+        </column>
+        <!--
+        One name column per fixed lane of the Node Runs by Type graph. Each
+        is the node name for its own type and sentinel otherwise, so a row
+        plots in exactly one of the Nodes, Agents and Tools lanes.
+        -->
+        <column>
+            <mnemonic>node-run-agent-name</mnemonic>
+            <title>Agent Name</title>
+            <type>string</type>
+            <expression>(if (eq ?nodeType "Agent") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else sentinel)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-name</mnemonic>
+            <title>Tool Name</title>
+            <type>string</type>
+            <expression>(if (eq ?nodeType "Tool") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else sentinel)</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-other-name</mnemonic>
+            <title>Node Name</title>
+            <type>string</type>
+            <expression>(if (or (eq ?nodeType "Agent") (eq ?nodeType "Tool")) then sentinel else (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name))</expression>
+        </column>
+        <!--
         Intervals still open (in flight during a live recording, or never
         ended) only have the Begin side, where ?error isn't bound.
         -->
@@ -827,9 +880,50 @@ Views:
                     <label-format>%s</label-format>
                     <value-from>node-run-lane</value-from>
                     <color-from>node-run-color</color-from>
-                    <label-from>node-run-lane</label-from>
+                    <label-from>node-run-hover</label-from>
                     <qualified-by>node-run-slot</qualified-by>
                 </plot-template>
+            </lane>
+        </graph>
+
+        <!--
+        Node Runs by Type: three fixed lanes, Nodes, Agents and Tools, which
+        render in declared order (like Apple's Foundation Models instrument).
+        Each plot takes its lane's name column, which is sentinel for the
+        other types, and <qualified-by>node-run-type-slot</qualified-by>
+        splits overlapping calls of the same type onto separate sub-rows.
+        -->
+        <graph>
+            <title>Node Runs by Type</title>
+            <lane>
+                <title>Nodes</title>
+                <table-ref>node-run-table</table-ref>
+                <plot>
+                    <value-from>node-run-other-name</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-hover</label-from>
+                    <qualified-by>node-run-type-slot</qualified-by>
+                </plot>
+            </lane>
+            <lane>
+                <title>Agents</title>
+                <table-ref>node-run-table</table-ref>
+                <plot>
+                    <value-from>node-run-agent-name</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-hover</label-from>
+                    <qualified-by>node-run-type-slot</qualified-by>
+                </plot>
+            </lane>
+            <lane>
+                <title>Tools</title>
+                <table-ref>node-run-table</table-ref>
+                <plot>
+                    <value-from>node-run-tool-name</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-hover</label-from>
+                    <qualified-by>node-run-type-slot</qualified-by>
+                </plot>
             </lane>
         </graph>
 
@@ -849,7 +943,7 @@ Views:
                     <label-format>Run %s</label-format>
                     <value-from>node-run-name</value-from>
                     <color-from>node-run-color</color-from>
-                    <label-from>node-run-lane</label-from>
+                    <label-from>node-run-hover</label-from>
                     <disable-implicit-qualifier/>
                     <containment-level-from>node-run-depth</containment-level-from>
                 </plot-template>
@@ -891,7 +985,9 @@ Views:
             <column>node-run-type</column>
             <column>node-run-depth</column>
             <column>node-run-parent-name</column>
+            <column>node-run-input</column>
             <column>node-run-slot</column>
+            <column>node-run-type-slot</column>
             <column>node-run-error</column>
             <column>node-run-run-id</column>
             <column>node-run-session-id</column>
