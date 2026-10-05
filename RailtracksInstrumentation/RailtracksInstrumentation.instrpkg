@@ -650,10 +650,14 @@ Views:
     NodeRun: one interval per node call (Agent, Tool, Function, custom).
     The kit computes a hierarchical lane string ("<key> <name>", e.g.
     "00-000.000 Math Agent") so lanes sort in call-tree order, and a slot
-    that separates overlapping calls within the same lane. ?name stays the
-    LAST field in both patterns, and the Begin's error binds to ?startError,
-    for the same reasons as AgentRun. AgentRun above stays for older SDK
-    versions.
+    that separates overlapping calls within the same lane. Pattern
+    variables bind to whole message arguments, so values with spaces (the
+    lane string, ?input) can sit anywhere. The free-text ?input goes LAST
+    so that when the unified log cuts a long message at about 1 KB, only
+    the text is clipped and every other field survives; Instruments
+    recordings keep about 32 KB per message. The Begin's error binds to
+    ?startError for the same reason as AgentRun. AgentRun above stays for
+    older SDK versions.
     -->
     <os-signpost-interval-schema>
         <id>track-node-run</id>
@@ -662,7 +666,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -776,7 +780,7 @@ Views:
         </column>
         <!--
         What the node received (prompt for an agent, arguments for a tool),
-        whitespace-collapsed and capped at 512 UTF-8 bytes by the kit.
+        whitespace-collapsed and capped at 4096 UTF-8 bytes by the kit.
         Hover is the interval label: "Name: input", or just "Name" when the
         input is empty.
         -->
@@ -807,9 +811,10 @@ Views:
     <!--
     NodeRun, Agent and Tool calls only: the same signpost as track-node-run,
     with the type as a constant in the start pattern, so each table holds
-    one type and feeds one lane of the Node Runs by Type graph. Name and
-    Hover use track-node-run's expressions, and the open-interval template
-    fills Error and Color the same way.
+    one type and feeds one lane of the Node Runs by Type graph. Field
+    order (free-text ?input last) follows track-node-run. Name and Hover
+    use track-node-run's expressions, and the open-interval template fills
+    Error and Color the same way.
     -->
     <os-signpost-interval-schema>
         <id>track-node-run-agent</id>
@@ -818,7 +823,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -894,7 +899,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " slot=" ?slot " typeSlot=" ?typeSlot " input=" ?input " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -964,6 +969,73 @@ Views:
     </os-signpost-interval-schema>
 
     <!--
+    NodeInstructions: an agent's system instructions, opened by the kit
+    only for agents that have them, at the same moment as (and nested in
+    time inside) the agent's NodeRun interval. It carries the agent's
+    nodeId, typeSlot and lane string, so the Node Runs by Type graph
+    qualifies it by the type slot and each bar sits on its agent's
+    sub-row. Free-text ?instructions goes LAST, as ?input does in NodeRun.
+    Every column is bound by the Begin, so open intervals need no template.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-instructions</id>
+        <title>Node Instructions</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeInstructions"</name>
+        <start-pattern>
+            <message>"nodeId=" ?nodeId " typeSlot=" ?typeSlot " name=" ?name " instructions=" ?instructions</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-instructions-lane</mnemonic>
+            <title>Node</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-text</mnemonic>
+            <title>Instructions</title>
+            <type>string</type>
+            <expression>?instructions</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?instructions)</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-color</mnemonic>
+            <title>Instructions Color</title>
+            <type>event-concept</type>
+            <expression>"Green"</expression>
+        </column>
+    </os-signpost-interval-schema>
+
+    <!--
     ============================================================
     INSTRUMENT
     ============================================================
@@ -1010,6 +1082,11 @@ Views:
             <schema-ref>track-node-run-tool</schema-ref>
         </create-table>
 
+        <create-table>
+            <id>node-instructions-table</id>
+            <schema-ref>track-node-instructions</schema-ref>
+        </create-table>
+
         <!--
         Node Runs timeline: one swimlane per kit-computed lane string. The
         lane key prefix ("00-000.000 ...") makes lanes sort in call-tree
@@ -1033,12 +1110,14 @@ Views:
         </graph>
 
         <!--
-        Node Runs by Type: two fixed lanes, Agents and Tools, which render in
-        declared order (like Apple's Foundation Models instrument). Each lane
-        reads its own per-type table, so it draws only that type's calls:
-        Instruments still draws rows whose value is sentinel, so one shared
-        table can't be filtered per lane. <qualified-by> on the type slot
-        splits overlapping calls of the same type onto separate sub-rows.
+        Node Runs by Type: three fixed lanes, Agents, Instructions and Tools,
+        which render in declared order (like Apple's Foundation Models
+        instrument). Each lane reads its own table, so it draws only its own
+        rows: Instruments still draws rows whose value is sentinel, so one
+        shared table can't be filtered per lane. <qualified-by> on the type
+        slot splits overlapping calls of the same type onto separate
+        sub-rows. Instructions bars carry their agent's type slot, so each
+        sits on the same sub-row as its agent.
         -->
         <graph>
             <title>Node Runs by Type</title>
@@ -1050,6 +1129,16 @@ Views:
                     <color-from>node-run-agent-color</color-from>
                     <label-from>node-run-agent-hover</label-from>
                     <qualified-by>node-run-agent-type-slot</qualified-by>
+                </plot>
+            </lane>
+            <lane>
+                <title>Instructions</title>
+                <table-ref>node-instructions-table</table-ref>
+                <plot>
+                    <value-from>node-instructions-name</value-from>
+                    <color-from>node-instructions-color</color-from>
+                    <label-from>node-instructions-hover</label-from>
+                    <qualified-by>node-instructions-type-slot</qualified-by>
                 </plot>
             </lane>
             <lane>
@@ -1128,6 +1217,19 @@ Views:
             <column>node-run-error</column>
             <column>node-run-run-id</column>
             <column>node-run-session-id</column>
+        </list>
+
+        <!--
+        Instructions list: one row per NodeInstructions interval, with the
+        agent's full system instructions (the timeline label is truncated).
+        -->
+        <list>
+            <title>Instructions</title>
+            <table-ref>node-instructions-table</table-ref>
+            <column>start</column>
+            <column>duration</column>
+            <column>node-instructions-name</column>
+            <column>node-instructions-text</column>
         </list>
 
         <!--
