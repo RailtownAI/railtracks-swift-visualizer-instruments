@@ -1088,28 +1088,6 @@ Views:
         </create-table>
 
         <!--
-        Node Runs timeline: one swimlane per kit-computed lane string. The
-        lane key prefix ("00-000.000 ...") makes lanes sort in call-tree
-        order. <qualified-by>node-run-slot</qualified-by> splits overlapping
-        calls in the same lane onto separate sub-rows.
-        -->
-        <graph>
-            <title>Node Runs</title>
-            <lane>
-                <title>Nodes</title>
-                <table-ref>node-run-table</table-ref>
-                <plot-template>
-                    <instance-by>node-run-lane</instance-by>
-                    <label-format>%s</label-format>
-                    <value-from>node-run-lane</value-from>
-                    <color-from>node-run-color</color-from>
-                    <label-from>node-run-hover</label-from>
-                    <qualified-by>node-run-slot</qualified-by>
-                </plot-template>
-            </lane>
-        </graph>
-
-        <!--
         Node Runs by Type: three fixed lanes, Agents, Instructions and Tools,
         which render in declared order (like Apple's Foundation Models
         instrument). Each lane reads its own table, so it draws only its own
