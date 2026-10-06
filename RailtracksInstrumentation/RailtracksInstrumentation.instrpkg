@@ -648,14 +648,14 @@ Views:
 
     <!--
     NodeRun: one interval per node call (Agent, Tool, Function, custom).
-    The kit computes a hierarchical lane string ("<key> <name>", e.g.
-    "00-000.000 Math Agent") so lanes sort in call-tree order, and a slot
-    that separates overlapping calls within the same lane. Pattern
-    variables bind to whole message arguments, so values with spaces (the
-    lane string, ?input) can sit anywhere. The free-text ?input goes LAST
-    so that when the unified log cuts a long message at about 1 KB, only
-    the text is clipped and every other field survives; Instruments
-    recordings keep about 32 KB per message. The Begin's error binds to
+    The kit sends the plain node name plus where the bar goes: ?run (the
+    run's first-seen ordinal, two digits) and ?depth (0 at the root, the
+    caller's depth + 1 below it) for the containment graph, and ?typeSlot
+    for the per-type lanes. Pattern variables bind to whole message
+    arguments, so values with spaces (?name, ?input) can sit anywhere.
+    The free-text ?input goes LAST so that when the unified log cuts a
+    long message at about 1 KB, only the text is clipped and every other
+    field survives; Instruments recordings keep about 32 KB per message. The Begin's error binds to
     ?startError for the same reason as AgentRun. AgentRun above stays for
     older SDK versions.
     -->
@@ -666,7 +666,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -674,26 +674,10 @@ Views:
             <message>"error=" ?error " name=" ?name</message>
         </end-pattern>
         <column>
-            <mnemonic>node-run-lane</mnemonic>
-            <title>Node</title>
-            <type>string</type>
-            <expression>?name</expression>
-        </column>
-        <column>
             <mnemonic>node-run-type</mnemonic>
             <title>Type</title>
             <type>string</type>
             <expression>?nodeType</expression>
-        </column>
-        <!--
-        Kit-assigned sub-row within a lane: 0 unless calls in the same lane
-        overlap in time. The Node Runs graph qualifies its plot by this.
-        -->
-        <column>
-            <mnemonic>node-run-slot</mnemonic>
-            <title>Slot</title>
-            <type>uint64</type>
-            <expression>?slot</expression>
         </column>
         <column>
             <mnemonic>node-run-node-id</mnemonic>
@@ -742,29 +726,27 @@ Views:
             <expression>(if (eq ?error 1) then "Red" else (if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green")))</expression>
         </column>
         <!--
-        Derived from the lane string "<key> <name>": the key is "%02d-%03d"
-        (run ordinal, root index) plus ".%03d" per nesting level, so its
-        length is 6 + 4*depth and the first space sits at 7 + 4*depth.
-        Name drops the key, Depth feeds the containment graph, and Run is
-        the ordinal before the first "-".
+        Sent by the kit as their own fields: Name is the plain node name,
+        Depth feeds the containment graph's nesting, and Run # (the run's
+        two-digit ordinal) names its "Run 00" lanes.
         -->
         <column>
             <mnemonic>node-run-name</mnemonic>
             <title>Name</title>
             <type>string</type>
-            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+            <expression>?name</expression>
         </column>
         <column>
             <mnemonic>node-run-depth</mnemonic>
             <title>Depth</title>
             <type>containment-level</type>
-            <expression>(div (- (str-index " " ?name) 7) 4)</expression>
+            <expression>?depth</expression>
         </column>
         <column>
             <mnemonic>node-run-run</mnemonic>
             <title>Run #</title>
             <type>string</type>
-            <expression>(sub-string 1 (- (str-index "-" ?name) 1) ?name)</expression>
+            <expression>?run</expression>
         </column>
         <!--
         Kit-assigned sub-row within a fixed per-type lane: the lowest slot
@@ -794,7 +776,7 @@ Views:
             <mnemonic>node-run-hover</mnemonic>
             <title>Hover</title>
             <type>string</type>
-            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
         </column>
         <!--
         Intervals still open (in flight during a live recording, or never
@@ -813,8 +795,8 @@ Views:
     with the type as a constant in the start pattern, so each table holds
     one type and feeds one lane of the Node Runs by Type graph. Field
     order (free-text ?input last) follows track-node-run. Name and Hover
-    use track-node-run's expressions, and the open-interval template fills
-    Error and Color the same way.
+    match track-node-run's, and the open-interval template fills Error and
+    Color the same way.
     -->
     <os-signpost-interval-schema>
         <id>track-node-run-agent</id>
@@ -823,7 +805,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -831,16 +813,10 @@ Views:
             <message>"error=" ?error " name=" ?name</message>
         </end-pattern>
         <column>
-            <mnemonic>node-run-agent-lane</mnemonic>
-            <title>Node</title>
-            <type>string</type>
-            <expression>?name</expression>
-        </column>
-        <column>
             <mnemonic>node-run-agent-name</mnemonic>
             <title>Name</title>
             <type>string</type>
-            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+            <expression>?name</expression>
         </column>
         <column>
             <mnemonic>node-run-agent-input</mnemonic>
@@ -852,7 +828,7 @@ Views:
             <mnemonic>node-run-agent-hover</mnemonic>
             <title>Hover</title>
             <type>string</type>
-            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
         </column>
         <column>
             <mnemonic>node-run-agent-type-slot</mnemonic>
@@ -899,7 +875,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " slot=" ?slot " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -907,16 +883,10 @@ Views:
             <message>"error=" ?error " name=" ?name</message>
         </end-pattern>
         <column>
-            <mnemonic>node-run-tool-lane</mnemonic>
-            <title>Node</title>
-            <type>string</type>
-            <expression>?name</expression>
-        </column>
-        <column>
             <mnemonic>node-run-tool-name</mnemonic>
             <title>Name</title>
             <type>string</type>
-            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+            <expression>?name</expression>
         </column>
         <column>
             <mnemonic>node-run-tool-input</mnemonic>
@@ -928,7 +898,7 @@ Views:
             <mnemonic>node-run-tool-hover</mnemonic>
             <title>Hover</title>
             <type>string</type>
-            <expression>(if (eq ?input "") then (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) else (str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?input))</expression>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
         </column>
         <column>
             <mnemonic>node-run-tool-type-slot</mnemonic>
@@ -972,7 +942,7 @@ Views:
     NodeInstructions: an agent's system instructions, opened by the kit
     only for agents that have them, at the same moment as (and nested in
     time inside) the agent's NodeRun interval. It carries the agent's
-    nodeId, typeSlot and lane string, so the Node Runs by Type graph
+    nodeId, typeSlot and plain name, so the Node Runs by Type graph
     qualifies it by the type slot and each bar sits on its agent's
     sub-row. Free-text ?instructions goes LAST, as ?input does in NodeRun.
     Every column is bound by the Begin, so open intervals need no template.
@@ -992,16 +962,10 @@ Views:
             <message>"name=" ?name</message>
         </end-pattern>
         <column>
-            <mnemonic>node-instructions-lane</mnemonic>
-            <title>Node</title>
-            <type>string</type>
-            <expression>?name</expression>
-        </column>
-        <column>
             <mnemonic>node-instructions-name</mnemonic>
             <title>Name</title>
             <type>string</type>
-            <expression>(sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name)</expression>
+            <expression>?name</expression>
         </column>
         <column>
             <mnemonic>node-instructions-text</mnemonic>
@@ -1013,7 +977,7 @@ Views:
             <mnemonic>node-instructions-hover</mnemonic>
             <title>Hover</title>
             <type>string</type>
-            <expression>(str-cat (sub-string (+ (str-index " " ?name) 1) (str-length ?name) ?name) ": " ?instructions)</expression>
+            <expression>(str-cat ?name ": " ?instructions)</expression>
         </column>
         <column>
             <mnemonic>node-instructions-type-slot</mnemonic>
@@ -1134,8 +1098,7 @@ Views:
         <!--
         Node Runs (containment): one lane per run, with each node call
         nested under its caller by containment level. Run, Name and Depth
-        are derived from the lane string, so the kit's wire format is the
-        same one the Node Runs graph above uses.
+        come straight from the kit's run, name and depth fields.
         -->
         <graph>
             <title>Node Runs (containment)</title>
@@ -1185,12 +1148,11 @@ Views:
             <table-ref>node-run-table</table-ref>
             <column>start</column>
             <column>duration</column>
-            <column>node-run-lane</column>
+            <column>node-run-name</column>
             <column>node-run-type</column>
             <column>node-run-depth</column>
             <column>node-run-parent-name</column>
             <column>node-run-input</column>
-            <column>node-run-slot</column>
             <column>node-run-type-slot</column>
             <column>node-run-error</column>
             <column>node-run-run-id</column>
