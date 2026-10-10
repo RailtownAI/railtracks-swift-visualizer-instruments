@@ -164,48 +164,45 @@ struct ContentView: View {
             sourceName = source
             status = .success(counts)
 
-            // Replay the JSON's agent hierarchy as begin/end interval
-            // signposts so the Agent Runs lane in Instruments shows a
+            // Replay the JSON's node hierarchy as begin/end interval
+            // signposts so the Node Runs lane in Instruments shows a
             // nested duration tree. Detached so the UI stays responsive
             // while the walk sleeps to give bars visible width.
             let snapshot = flowNodes
             Task.detached {
-                await Self.emitAgentIntervals(roots: snapshot)
+                await Self.emitNodeIntervals(roots: snapshot)
             }
         } catch {
             status = .failure(error.localizedDescription)
         }
     }
 
-    // MARK: - AgentRun replay
+    // MARK: - NodeRun replay
 
-    /// Walks the parsed FlowNode tree and emits one begin/end AgentRun
-    /// interval per Agent node, nested by recursion (a parent's `end`
-    /// fires after all descendants' `end`s, so Instruments renders the
-    /// parent bar wrapping its children's bars).
+    /// Walks the parsed FlowNode tree and emits one begin/end NodeRun
+    /// interval per node of every type, nested by recursion (a parent's
+    /// `end` fires after all descendants' `end`s, and each child begins
+    /// while its parent's interval is open, so Instruments nests the
+    /// child's lane under the parent's).
     ///
     /// os_signpost intervals always stamp at "now" — there's no API to
     /// forge past timestamps. So we can't replay the exact recorded
     /// timeline; we approximate it by sleeping `latency * scale` (with a
     /// floor) before closing each node's interval. The scale compresses
     /// long real runs (minutes) into seconds while still preserving the
-    /// relative proportions between agents.
-    nonisolated private static func emitAgentIntervals(roots: [FlowNode]) async {
+    /// relative proportions between nodes.
+    nonisolated private static func emitNodeIntervals(roots: [FlowNode]) async {
         let scale: Double = 0.01    // 1% of recorded latency
         let minSleep: Duration = .milliseconds(20)
         let setupSleep: Duration = .milliseconds(15)
-        @Sendable func visit(_ node: FlowNode, parentName: String) async {
-            // Only Agents get intervals — Tools are point events handled
-            // by FlowGraphMapper's FlowTreeNode emission.
-            guard node.nodeType == .agent else {
-                for child in node.children { await visit(child, parentName: parentName) }
-                return
-            }
-            // Pass a plain name — begin() prepends the SDK-assigned per-run
-            // start index so the Agent Runs lane stays ordered.
-            let handle = RailtracksSignposts.begin(AgentRun(
+        @Sendable func visit(_ node: FlowNode, parentNodeId: String, parentName: String) async {
+            // Pass a plain name — begin() derives the lane from the node's
+            // live parent interval, so the Node Runs lanes nest.
+            let handle = RailtracksSignposts.begin(NodeRun(
                 name: node.name,
+                nodeType: node.nodeType,
                 nodeId: node.nodeId,
+                parentNodeId: parentNodeId,
                 sessionId: node.sessionId,
                 runId: node.runId,
                 parentName: parentName
@@ -214,15 +211,17 @@ struct ContentView: View {
             // child does on the timeline (otherwise they appear stacked
             // at the same x-coordinate).
             try? await Task.sleep(for: setupSleep)
-            for child in node.children { await visit(child, parentName: node.name) }
+            for child in node.children {
+                await visit(child, parentNodeId: node.nodeId, parentName: node.name)
+            }
             // Tail: scaled latency, floored to keep the bar visible for
-            // agents whose recorded latency is tiny.
+            // nodes whose recorded latency is tiny.
             let scaled = Duration.seconds(node.latency * scale)
             try? await Task.sleep(for: max(minSleep, scaled))
             RailtracksSignposts.end(handle, error: node.error)
         }
 
-        for root in roots { await visit(root, parentName: "") }
+        for root in roots { await visit(root, parentNodeId: "", parentName: "") }
     }
 }
 

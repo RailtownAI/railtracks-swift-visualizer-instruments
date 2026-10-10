@@ -560,6 +560,9 @@ Views:
     it on close. ?name is the LAST field in both patterns because it can
     contain spaces — CLIPS' greedy single-token capture only works on the
     pattern's trailing variable.
+    The Begin's seeded error=0 binds to ?startError, not ?error: a variable
+    used in both patterns must match, so an error=1 End would never close
+    the interval.
     -->
     <os-signpost-interval-schema>
         <id>track-agent-run</id>
@@ -568,7 +571,7 @@ Views:
         <category>"Observation"</category>
         <name>"AgentRun"</name>
         <start-pattern>
-            <message>"error=" ?error " nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " index=" ?index " parentName=" ?parentName " name=" ?name</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " sessionId=" ?sessionId " runId=" ?runId " index=" ?index " parentName=" ?parentName " name=" ?name</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -631,6 +634,369 @@ Views:
             <type>event-concept</type>
             <expression>(if (eq ?error 1) then "Red" else "Purple")</expression>
         </column>
+        <!--
+        Intervals still open (in flight during a live recording, or never
+        ended) only have the Begin side, where ?error isn't bound.
+        -->
+        <open-interval-template>
+            <mnemonic>agent-run-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>agent-run-color</mnemonic>
+            <expression>"Purple"</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <!--
+    NodeRun: one interval per node call (Agent, Tool, Function, custom).
+    The kit sends the plain node name plus where the bar goes: ?run (the
+    run's first-seen ordinal, two digits) and ?depth (0 at the root, the
+    caller's depth + 1 below it) for the containment graph, and ?typeSlot
+    for the per-type lanes. Pattern variables bind to whole message
+    arguments, so values with spaces (?name, ?input) can sit anywhere.
+    The free-text ?input goes LAST so that when the unified log cuts a
+    long message at about 1 KB, only the text is clipped and every other
+    field survives; Instruments recordings keep about 32 KB per message. The Begin's error binds to
+    ?startError for the same reason as AgentRun. AgentRun above stays for
+    older SDK versions.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-run</id>
+        <title>Node Run</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-type</mnemonic>
+            <title>Type</title>
+            <type>string</type>
+            <expression>?nodeType</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-parent-node-id</mnemonic>
+            <title>Parent Node ID</title>
+            <type>string</type>
+            <expression>?parentNodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-session-id</mnemonic>
+            <title>Session</title>
+            <type>string</type>
+            <expression>?sessionId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-run-id</mnemonic>
+            <title>Run</title>
+            <type>string</type>
+            <expression>?runId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <!--
+        Row color: Red on error, otherwise Agent=Purple / Tool=Blue (matching
+        the Flow Tree event-concept column), Green for Function and custom types.
+        -->
+        <column>
+            <mnemonic>node-run-color</mnemonic>
+            <title>Node Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else (if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green")))</expression>
+        </column>
+        <!--
+        Sent by the kit as their own fields: Name is the plain node name,
+        Depth feeds the containment graph's nesting, and Run # (the run's
+        two-digit ordinal) names its "Run 00" lanes.
+        -->
+        <column>
+            <mnemonic>node-run-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-depth</mnemonic>
+            <title>Depth</title>
+            <type>containment-level</type>
+            <expression>?depth</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-run</mnemonic>
+            <title>Run #</title>
+            <type>string</type>
+            <expression>?run</expression>
+        </column>
+        <!--
+        Kit-assigned sub-row within a fixed per-type lane: the lowest slot
+        not held by another live call of the same type bucket (Agent, Tool,
+        or Other), process-wide. The Node Runs by Type graph qualifies its
+        Agents and Tools plots by the per-type tables' copy of this.
+        -->
+        <column>
+            <mnemonic>node-run-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <!--
+        What the node received (prompt for an agent, arguments for a tool),
+        whitespace-collapsed and capped at 4096 UTF-8 bytes by the kit.
+        Hover is the interval label: "Name: input", or just "Name" when the
+        input is empty.
+        -->
+        <column>
+            <mnemonic>node-run-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
+        </column>
+        <!--
+        Intervals still open (in flight during a live recording, or never
+        ended) only have the Begin side, where ?error isn't bound.
+        -->
+        <open-interval-template>
+            <mnemonic>node-run-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-color</mnemonic>
+            <expression>(if (eq ?nodeType "Agent") then "Purple" else (if (eq ?nodeType "Tool") then "Blue" else "Green"))</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <!--
+    NodeRun, Agent and Tool calls only: the same signpost as track-node-run,
+    with the type as a constant in the start pattern, so each table holds
+    one type and feeds one lane of the Node Runs by Type graph. Field
+    order (free-text ?input last) follows track-node-run. Name and Hover
+    match track-node-run's, and the open-interval template fills Error and
+    Color the same way.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-run-agent</id>
+        <title>Node Run (Agent)</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-agent-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-color</mnemonic>
+            <title>Agent Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else "Purple")</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <open-interval-template>
+            <mnemonic>node-run-agent-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-agent-color</mnemonic>
+            <expression>"Purple"</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <os-signpost-interval-schema>
+        <id>track-node-run-tool</id>
+        <title>Node Run (Tool)</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeRun"</name>
+        <start-pattern>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"error=" ?error " name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-run-tool-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-input</mnemonic>
+            <title>Input</title>
+            <type>string</type>
+            <expression>?input</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(if (eq ?input "") then ?name else (str-cat ?name ": " ?input))</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-error</mnemonic>
+            <title>Error</title>
+            <type>uint64</type>
+            <expression>?error</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-color</mnemonic>
+            <title>Tool Color</title>
+            <type>event-concept</type>
+            <expression>(if (eq ?error 1) then "Red" else "Blue")</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-parent-name</mnemonic>
+            <title>Parent</title>
+            <type>string</type>
+            <expression>?parentName</expression>
+        </column>
+        <open-interval-template>
+            <mnemonic>node-run-tool-error</mnemonic>
+            <expression>?startError</expression>
+            <mnemonic>node-run-tool-color</mnemonic>
+            <expression>"Blue"</expression>
+        </open-interval-template>
+    </os-signpost-interval-schema>
+
+    <!--
+    NodeInstructions: an agent's system instructions, opened by the kit
+    only for agents that have them, at the same moment as (and nested in
+    time inside) the agent's NodeRun interval. It carries the agent's
+    nodeId, typeSlot and plain name, so the Node Runs by Type graph
+    qualifies it by the type slot and each bar sits on its agent's
+    sub-row. Free-text ?instructions goes LAST, as ?input does in NodeRun.
+    Every column is bound by the Begin, so open intervals need no template.
+    -->
+    <os-signpost-interval-schema>
+        <id>track-node-instructions</id>
+        <title>Node Instructions</title>
+        <subsystem>"io.railtown.visualizer.observability"</subsystem>
+        <category>"Observation"</category>
+        <name>"NodeInstructions"</name>
+        <start-pattern>
+            <message>"nodeId=" ?nodeId " typeSlot=" ?typeSlot " name=" ?name " instructions=" ?instructions</message>
+            <thread>?thread</thread>
+            <process>?process</process>
+        </start-pattern>
+        <end-pattern>
+            <message>"name=" ?name</message>
+        </end-pattern>
+        <column>
+            <mnemonic>node-instructions-name</mnemonic>
+            <title>Name</title>
+            <type>string</type>
+            <expression>?name</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-text</mnemonic>
+            <title>Instructions</title>
+            <type>string</type>
+            <expression>?instructions</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-hover</mnemonic>
+            <title>Hover</title>
+            <type>string</type>
+            <expression>(str-cat ?name ": " ?instructions)</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-type-slot</mnemonic>
+            <title>Type Slot</title>
+            <type>uint64</type>
+            <expression>?typeSlot</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-node-id</mnemonic>
+            <title>Node ID</title>
+            <type>string</type>
+            <expression>?nodeId</expression>
+        </column>
+        <column>
+            <mnemonic>node-instructions-color</mnemonic>
+            <title>Instructions Color</title>
+            <type>event-concept</type>
+            <expression>"Green"</expression>
+        </column>
     </os-signpost-interval-schema>
 
     <!--
@@ -665,6 +1031,92 @@ Views:
             <schema-ref>track-agent-run</schema-ref>
         </create-table>
 
+        <create-table>
+            <id>node-run-table</id>
+            <schema-ref>track-node-run</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>node-run-agent-table</id>
+            <schema-ref>track-node-run-agent</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>node-run-tool-table</id>
+            <schema-ref>track-node-run-tool</schema-ref>
+        </create-table>
+
+        <create-table>
+            <id>node-instructions-table</id>
+            <schema-ref>track-node-instructions</schema-ref>
+        </create-table>
+
+        <!--
+        Node Runs by Type: three fixed lanes, Agents, Instructions and Tools,
+        which render in declared order (like Apple's Foundation Models
+        instrument). Each lane reads its own table, so it draws only its own
+        rows: Instruments still draws rows whose value is sentinel, so one
+        shared table can't be filtered per lane. <qualified-by> on the type
+        slot splits overlapping calls of the same type onto separate
+        sub-rows. Instructions bars carry their agent's type slot, so each
+        sits on the same sub-row as its agent.
+        -->
+        <graph>
+            <title>Node Runs by Type</title>
+            <lane>
+                <title>Agents</title>
+                <table-ref>node-run-agent-table</table-ref>
+                <plot>
+                    <value-from>node-run-agent-name</value-from>
+                    <color-from>node-run-agent-color</color-from>
+                    <label-from>node-run-agent-hover</label-from>
+                    <qualified-by>node-run-agent-type-slot</qualified-by>
+                </plot>
+            </lane>
+            <lane>
+                <title>Instructions</title>
+                <table-ref>node-instructions-table</table-ref>
+                <plot>
+                    <value-from>node-instructions-name</value-from>
+                    <color-from>node-instructions-color</color-from>
+                    <label-from>node-instructions-hover</label-from>
+                    <qualified-by>node-instructions-type-slot</qualified-by>
+                </plot>
+            </lane>
+            <lane>
+                <title>Tools</title>
+                <table-ref>node-run-tool-table</table-ref>
+                <plot>
+                    <value-from>node-run-tool-name</value-from>
+                    <color-from>node-run-tool-color</color-from>
+                    <label-from>node-run-tool-hover</label-from>
+                    <qualified-by>node-run-tool-type-slot</qualified-by>
+                </plot>
+            </lane>
+        </graph>
+
+        <!--
+        Node Runs (containment): one lane per run, with each node call
+        nested under its caller by containment level. Run, Name and Depth
+        come straight from the kit's run, name and depth fields.
+        -->
+        <graph>
+            <title>Node Runs (containment)</title>
+            <lane>
+                <title>Runs</title>
+                <table-ref>node-run-table</table-ref>
+                <plot-template>
+                    <instance-by>node-run-run</instance-by>
+                    <label-format>Run %s</label-format>
+                    <value-from>node-run-name</value-from>
+                    <color-from>node-run-color</color-from>
+                    <label-from>node-run-hover</label-from>
+                    <disable-implicit-qualifier/>
+                    <containment-level-from>node-run-depth</containment-level-from>
+                </plot-template>
+            </lane>
+        </graph>
+
         <!--
         Agent Runs timeline: one swimlane per agent name. <plot-template>
         with <instance-by>agent-run-name</instance-by> auto-creates a row
@@ -687,6 +1139,38 @@ Views:
                 </plot-template>
             </lane>
         </graph>
+
+        <!--
+        Node Runs list: tabular view of every node call interval.
+        -->
+        <list>
+            <title>Node Runs</title>
+            <table-ref>node-run-table</table-ref>
+            <column>start</column>
+            <column>duration</column>
+            <column>node-run-name</column>
+            <column>node-run-type</column>
+            <column>node-run-depth</column>
+            <column>node-run-parent-name</column>
+            <column>node-run-input</column>
+            <column>node-run-type-slot</column>
+            <column>node-run-error</column>
+            <column>node-run-run-id</column>
+            <column>node-run-session-id</column>
+        </list>
+
+        <!--
+        Instructions list: one row per NodeInstructions interval, with the
+        agent's full system instructions (the timeline label is truncated).
+        -->
+        <list>
+            <title>Instructions</title>
+            <table-ref>node-instructions-table</table-ref>
+            <column>start</column>
+            <column>duration</column>
+            <column>node-instructions-name</column>
+            <column>node-instructions-text</column>
+        </list>
 
         <!--
         Agent Runs list: tabular view of every interval with start time,
