@@ -650,7 +650,7 @@ Views:
     NodeRun: one interval per node call (Agent, Tool, Function, custom).
     The kit sends the plain node name plus where the bar goes: ?run (the
     run's first-seen ordinal, two digits) and ?depth (0 at the root, the
-    caller's depth + 1 below it) for the containment graph, and ?typeSlot
+    caller's depth + 1 below it) for the Node Runs by Run graph, and ?typeSlot
     for the per-type lanes. Pattern variables bind to whole message
     arguments, so values with spaces (?name, ?input) can sit anywhere.
     The free-text ?input goes LAST so that when the unified log cuts a
@@ -727,8 +727,8 @@ Views:
         </column>
         <!--
         Sent by the kit as their own fields: Name is the plain node name,
-        Depth feeds the containment graph's nesting, and Run # (the run's
-        two-digit ordinal) names its "Run 00" lanes.
+        Depth picks each call's row in the Node Runs by Run graph, and Run #
+        (the run's two-digit ordinal) names its "Run 00" lanes.
         -->
         <column>
             <mnemonic>node-run-name</mnemonic>
@@ -1096,12 +1096,13 @@ Views:
         </graph>
 
         <!--
-        Node Runs (containment): one lane per run, with each node call
-        nested under its caller by containment level. Run, Name and Depth
-        come straight from the kit's run, name and depth fields.
+        Node Runs by Run: one lane per run, with one row per depth: the
+        root call on the first row, its children on the next, and so on.
+        Every call gets a full row height, also in deep runs. Run, Name and
+        Depth come straight from the kit's run, name and depth fields.
         -->
         <graph>
-            <title>Node Runs (containment)</title>
+            <title>Node Runs by Run</title>
             <lane>
                 <title>Runs</title>
                 <table-ref>node-run-table</table-ref>
@@ -1111,8 +1112,7 @@ Views:
                     <value-from>node-run-name</value-from>
                     <color-from>node-run-color</color-from>
                     <label-from>node-run-hover</label-from>
-                    <disable-implicit-qualifier/>
-                    <containment-level-from>node-run-depth</containment-level-from>
+                    <qualified-by>node-run-depth</qualified-by>
                 </plot-template>
             </lane>
         </graph>
