@@ -143,10 +143,14 @@ To show only some of the graphs:
 
 To show a hidden graph again, select its checkbox.
 
-![Graph Display menu](images/graph-display-menu.png)
+With **Node Runs by Type** selected, the track shows one lane each for agents,
+instructions and tools:
 
-The screenshot comes from an older build of the package, where **Node Runs by
-Run** was named **Node Runs (containment)**.
+![Graph Display menu with Node Runs by Type selected](images/graph-display-by-type.png)
+
+With **Node Runs by Run** selected, the track shows one lane per run:
+
+![Graph Display menu with Node Runs by Run selected](images/graph-display-by-run.png)
 
 ### Schema
 
