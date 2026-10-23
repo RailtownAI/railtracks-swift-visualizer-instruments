@@ -88,7 +88,7 @@ Xcode project is required on their side.
 ## Railtracks Instrumentation
 
 The **Railtracks Instrumentation** instrument visualizes nodes, edges, and
-per-LLM-call metrics from an `RTSFlowGraph` JSON file. It exposes five views:
+per-LLM-call metrics from an `RTSFlowGraph` JSON file. It exposes these views:
 
 - **Flow Tree** — 5-level aggregation (`a0`→`a4`) of agent/tool nodes with
   model, provider, tokens, latency, cost, and start-time columns. The depth is
@@ -100,7 +100,14 @@ per-LLM-call metrics from an `RTSFlowGraph` JSON file. It exposes five views:
   Extended Detail pane. A grouped **Tool I/O Summary** rolls these up by
   tool → Input/Output.
 - **Call Tree** — emit-site backtraces with click-to-source jumps
+- **Node Runs by Type** — every node call on a timeline, in three lanes:
+  Agents, Instructions and Tools
+- **Node Runs by Run** — every node call on a timeline, with one lane per run
+  and one row per call depth
 - **Agent Runs** — per-agent duration bars on a timeline (red on error)
+
+The last three are graphs in the instrument's track. You can choose which of
+them to show: see [Choose which graphs to show](#choose-which-graphs-to-show).
 
 The signpost emission lives in the
 [RailtracksInstrumentationKit](https://github.com/RailtownAI/railtracks-swift-visualizer-instruments)
@@ -120,8 +127,30 @@ Package Manager), constructs the events from the JSON, and emits them.
    pasting a URL and pressing **Fetch**. Sample files live in `resources/`
    (e.g. `Orchestration_Flow_for_Job_0_*.json`).
 6. The app emits `os_signpost` events that the instrument captures and renders
-   across all five views. Loading a JSON also replays each agent as a
-   begin/end interval, so the **Agent Runs** lane fills in.
+   across all the views. Loading a JSON also replays each node as a
+   begin/end interval, so the **Node Runs** and **Agent Runs** graphs fill in.
+
+### Choose which graphs to show
+
+The instrument's track draws three graphs: **Node Runs by Type**, **Node Runs
+by Run** and **Agent Runs**. A recording with many runs makes the track tall.
+To show only some of the graphs:
+
+1. In the track header, click the **Instrument** menu under
+   **Railtracks Instrumentation**.
+2. In **Railtracks Instrumentation Graph Display**, clear the checkbox of each
+   graph to hide.
+
+To show a hidden graph again, select its checkbox.
+
+With **Node Runs by Type** selected, the track shows one lane each for agents,
+instructions and tools:
+
+![Graph Display menu with Node Runs by Type selected](images/graph-display-by-type.png)
+
+With **Node Runs by Run** selected, the track shows one lane per run:
+
+![Graph Display menu with Node Runs by Run selected](images/graph-display-by-run.png)
 
 ### Schema
 
