@@ -104,10 +104,19 @@ per-LLM-call metrics from an `RTSFlowGraph` JSON file. It exposes these views:
   Agents, Instructions and Tools
 - **Node Runs by Run** — every node call on a timeline, with one lane per run
   and one row per call depth
+- **Node Runs** — every node call in a list, with **Provider** and **Model**
+  columns next to the name and type. Select an agent bar in **Node Runs by
+  Type** to see its provider and model in the detail panel. Tool and function
+  rows show `-`.
 - **Agent Runs** — per-agent duration bars on a timeline (red on error)
 
-The last three are graphs in the instrument's track. You can choose which of
+The **Node Runs by Type**, **Node Runs by Run** and **Agent Runs** views are
+graphs in the instrument's track. You can choose which of
 them to show: see [Choose which graphs to show](#choose-which-graphs-to-show).
+
+> **Compatibility.** The package and the kit must match: this package reads
+> the NodeRun signposts of RailtracksInstrumentationKit 1.2.0 and later. An
+> app built with an older kit shows empty Node Runs graphs in this package.
 
 The signpost emission lives in the
 [RailtracksInstrumentationKit](https://github.com/RailtownAI/railtracks-swift-visualizer-instruments)

@@ -205,7 +205,9 @@ struct ContentView: View {
                 parentNodeId: parentNodeId,
                 sessionId: node.sessionId,
                 runId: node.runId,
-                parentName: parentName
+                parentName: parentName,
+                provider: node.provider,
+                model: node.model
             ))
             // Small lead so the parent bar visibly starts before the first
             // child does on the timeline (otherwise they appear stacked
