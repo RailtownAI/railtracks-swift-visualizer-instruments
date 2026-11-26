@@ -666,7 +666,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" ?nodeType " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " model=" ?model " provider=" ?provider " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -678,6 +678,22 @@ Views:
             <title>Type</title>
             <type>string</type>
             <expression>?nodeType</expression>
+        </column>
+        <!--
+        The LLM behind an agent call, sent by the kit as "-" when empty
+        (tools, functions and agents without one).
+        -->
+        <column>
+            <mnemonic>node-run-provider</mnemonic>
+            <title>Provider</title>
+            <type>string</type>
+            <expression>?provider</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
         </column>
         <column>
             <mnemonic>node-run-node-id</mnemonic>
@@ -794,9 +810,10 @@ Views:
     NodeRun, Agent and Tool calls only: the same signpost as track-node-run,
     with the type as a constant in the start pattern, so each table holds
     one type and feeds one lane of the Node Runs by Type graph. Field
-    order (free-text ?input last) follows track-node-run. Name and Hover
-    match track-node-run's, and the open-interval template fills Error and
-    Color the same way.
+    order (free-text ?input last) follows track-node-run. Name, Provider,
+    Model and Hover match track-node-run's (the selected agent bar's detail
+    reads this table, so it needs Provider and Model too), and the
+    open-interval template fills Error and Color the same way.
     -->
     <os-signpost-interval-schema>
         <id>track-node-run-agent</id>
@@ -805,7 +822,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Agent" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " model=" ?model " provider=" ?provider " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -817,6 +834,22 @@ Views:
             <title>Name</title>
             <type>string</type>
             <expression>?name</expression>
+        </column>
+        <!--
+        The LLM behind an agent call, sent by the kit as "-" when empty
+        (tools, functions and agents without one).
+        -->
+        <column>
+            <mnemonic>node-run-agent-provider</mnemonic>
+            <title>Provider</title>
+            <type>string</type>
+            <expression>?provider</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-agent-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
         </column>
         <column>
             <mnemonic>node-run-agent-input</mnemonic>
@@ -875,7 +908,7 @@ Views:
         <category>"Observation"</category>
         <name>"NodeRun"</name>
         <start-pattern>
-            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " parentName=" ?parentName " name=" ?name " input=" ?input</message>
+            <message>"error=" ?startError " nodeId=" ?nodeId " parentNodeId=" ?parentNodeId " sessionId=" ?sessionId " runId=" ?runId " nodeType=" "Tool" " run=" ?run " depth=" ?depth " typeSlot=" ?typeSlot " model=" ?model " provider=" ?provider " parentName=" ?parentName " name=" ?name " input=" ?input</message>
             <thread>?thread</thread>
             <process>?process</process>
         </start-pattern>
@@ -887,6 +920,22 @@ Views:
             <title>Name</title>
             <type>string</type>
             <expression>?name</expression>
+        </column>
+        <!--
+        The LLM behind an agent call, sent by the kit as "-" when empty
+        (tools, functions and agents without one).
+        -->
+        <column>
+            <mnemonic>node-run-tool-provider</mnemonic>
+            <title>Provider</title>
+            <type>string</type>
+            <expression>?provider</expression>
+        </column>
+        <column>
+            <mnemonic>node-run-tool-model</mnemonic>
+            <title>Model</title>
+            <type>string</type>
+            <expression>?model</expression>
         </column>
         <column>
             <mnemonic>node-run-tool-input</mnemonic>
@@ -1150,6 +1199,8 @@ Views:
             <column>duration</column>
             <column>node-run-name</column>
             <column>node-run-type</column>
+            <column>node-run-provider</column>
+            <column>node-run-model</column>
             <column>node-run-depth</column>
             <column>node-run-parent-name</column>
             <column>node-run-input</column>
